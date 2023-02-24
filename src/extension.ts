@@ -88,50 +88,95 @@ class QueryProvider implements azdata.QueryProvider {
         this.connectionProvider = connectionProvider;
     }
 
-    cancelQuery(ownerUri: string): Thenable<azdata.QueryCancelResult> {
-        throw new Error('Method not implemented.');
+    public connectionUriChanged(a: unknown, b: unknown): void {
+        return;
     }
 
-    runQuery(ownerUri: string, selection: azdata.ISelectionData, runOptions?: azdata.ExecutionPlanOptions | undefined): Thenable<void> {
-        // this.onQueryComplete.fire({
-        //     ownerUri,
-        //     batchSummaries: [
-        //         {
-        //             hasError: false,
-        //             id: 0,
-        //             selection: selection,
-        //             executionStart: "10",
-        //             executionEnd: "30",
-        //             executionElapsed: "20",
-        //             resultSetSummaries: null
-        //         }
-        //     ]
-        // });
-
-        this.onResultSetAvailable.fire({
+    cancelQuery(ownerUri: string): Promise<azdata.QueryCancelResult> {
+        this.onQueryComplete.fire({
             ownerUri,
-            resultSetSummary: {
-                id: 1,
+            batchSummaries: []
+        });
+        return Promise.resolve<azdata.QueryCancelResult>({
+            messages: "Cancelled the query."
+        });
+        //throw new Error('Method not implemented.');
+    }
+
+    async runQuery(ownerUri: string, selection: azdata.ISelectionData | undefined, runOptions?: azdata.ExecutionPlanOptions | undefined): Promise<void> {
+        const conn = await azdata.connection.getConnection(ownerUri);
+        var doc = vscode.workspace.textDocuments.find(td => td.uri.toString() === ownerUri);
+
+        setTimeout(() => {
+            if (!doc) {
+                // TODO Report error.
+                return;
+            }
+
+            let text = doc.getText();
+
+            if (!selection) {
+                let lines = text.split("\n");
+                selection = {
+                    startLine: 0,
+                    startColumn: 0,
+                    endLine: lines.length - 1,
+                    endColumn: lines[lines.length - 1].length
+                };
+            }
+            
+            const range = new vscode.Range(selection.startLine, selection.startColumn, selection.endLine, selection.endColumn);
+            text = doc.getText(range);
+
+            const resultSetSummary: azdata.ResultSetSummary = {
+                id: 0,
                 batchId: 0,
-                rowCount: 1,
+                rowCount: 2,
                 columnInfo: [
-                    {
-                        baseCatalogName: "CatalogName",
-                        baseColumnName: "ColumnName",
-                        baseSchemaName: "SchemeName",
-                        baseServerName: "ServerName",
-                        baseTableName: "TableName",
-                        columnName: "Name",
-                        dataType: "String",
-                        udtAssemblyQualifiedName: "",
-                        dataTypeName: "string"
+                    <azdata.IDbColumn>{
+                        columnName: "Name"
+                    },
+                    <azdata.IDbColumn>{
+                        columnName: "Number"
+                    },
+                    <azdata.IDbColumn>{
+                        columnName: "DateAndTime"
                     }
                 ],
                 complete: true
-            }
-        });
+            };
 
-        return Promise.resolve();
+            const batch: azdata.BatchSummary = <azdata.BatchSummary>{
+                id: 0,
+                selection: selection,
+                executionStart: new Date().toISOString()
+            };
+
+            this.onBatchStart.fire({
+                ownerUri,
+                batchSummary: batch
+            });
+
+            this.onResultSetAvailable.fire({
+                ownerUri,
+                resultSetSummary: resultSetSummary
+            });
+
+            batch.executionEnd = new Date().toISOString();
+            batch.executionElapsed = "00:00:02.289";
+            batch.hasError = false;
+            batch.resultSetSummaries = [resultSetSummary];
+
+            this.onBatchComplete.fire({
+                ownerUri,
+                batchSummary: batch
+            });
+
+            this.onQueryComplete.fire({
+                ownerUri,
+                batchSummaries: [batch]
+            });
+        }, 0);
     }
 
     runQueryStatement(ownerUri: string, line: number, column: number): Thenable<void> {
@@ -146,17 +191,44 @@ class QueryProvider implements azdata.QueryProvider {
     parseSyntax(ownerUri: string, query: string): Thenable<azdata.SyntaxParseResult> {
         throw new Error('Method not implemented.');
     }
-    getQueryRows(rowData: azdata.QueryExecuteSubsetParams): Thenable<azdata.QueryExecuteSubsetResult> {
-        return Promise.resolve({
+    async getQueryRows(rowData: azdata.QueryExecuteSubsetParams): Promise<azdata.QueryExecuteSubsetResult> {
+        return await Promise.resolve({
             message: "",
             resultSubset: {
-                rowCount: 1,
+                rowCount: 2,
                 rows: [
                     [
                         {
                             displayValue: "Hello!",
                             isNull: false,
                             invariantCultureDisplayValue: "Hello!"
+                        },
+                        {
+                            displayValue: "24",
+                            isNull: false,
+                            invariantCultureDisplayValue: "24"
+                        },
+                        {
+                            displayValue: "2022-08-04T23:18:02.382",
+                            isNull: false,
+                            invariantCultureDisplayValue: "2022-08-04T23:18:02.382"
+                        }
+                    ],
+                    [
+                        {
+                            displayValue: "Hello 2!",
+                            isNull: false,
+                            invariantCultureDisplayValue: "Hello!"
+                        },
+                        {
+                            displayValue: "3",
+                            isNull: false,
+                            invariantCultureDisplayValue: "3"
+                        },
+                        {
+                            displayValue: "",
+                            isNull: true,
+                            invariantCultureDisplayValue: ""
                         }
                     ]
                 ]
