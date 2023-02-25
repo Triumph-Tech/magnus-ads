@@ -1,5 +1,19 @@
 import * as vscode from 'vscode';
 import * as azdata from 'azdata';
+import { QueryRunner } from './queryRunner';
+
+function toElapsed(totalMilliseconds: number): string {
+    const hours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
+    totalMilliseconds = totalMilliseconds % (1000 * 60 * 60);
+
+    const minutes = Math.floor(totalMilliseconds / (1000 * 60));
+    totalMilliseconds = totalMilliseconds % (1000 * 60);
+
+    const seconds = Math.floor(totalMilliseconds / 1000);
+    const milliseconds = totalMilliseconds % 1000;
+
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`
+}
 
 class ConnectionProvider implements azdata.ConnectionProvider {
     handle?: number | undefined;
@@ -79,10 +93,14 @@ class QueryProvider implements azdata.QueryProvider {
     public readonly providerId: string = "magnus";
 
     private connectionProvider: ConnectionProvider;
+
+    private activeQueries: Record<string, QueryRunner> = {};
+
     private onQueryComplete: vscode.EventEmitter<azdata.QueryExecuteCompleteNotificationResult> = new vscode.EventEmitter();
     private onResultSetAvailable: vscode.EventEmitter<azdata.QueryExecuteResultSetNotificationParams> = new vscode.EventEmitter();
     private onBatchStart: vscode.EventEmitter<azdata.QueryExecuteBatchNotificationParams> = new vscode.EventEmitter();
     private onBatchComplete: vscode.EventEmitter<azdata.QueryExecuteBatchNotificationParams> = new vscode.EventEmitter();
+    private onMessage: vscode.EventEmitter<azdata.QueryExecuteMessageParams> = new vscode.EventEmitter();
 
     public constructor(connectionProvider: ConnectionProvider) {
         this.connectionProvider = connectionProvider;
@@ -93,21 +111,26 @@ class QueryProvider implements azdata.QueryProvider {
     }
 
     cancelQuery(ownerUri: string): Promise<azdata.QueryCancelResult> {
+        if (ownerUri in this.activeQueries) {
+            this.activeQueries[ownerUri].cancel();
+            delete this.activeQueries[ownerUri];
+        }
+
         this.onQueryComplete.fire({
             ownerUri,
             batchSummaries: []
         });
+
         return Promise.resolve<azdata.QueryCancelResult>({
             messages: "Cancelled the query."
         });
-        //throw new Error('Method not implemented.');
     }
 
     async runQuery(ownerUri: string, selection: azdata.ISelectionData | undefined, runOptions?: azdata.ExecutionPlanOptions | undefined): Promise<void> {
         const conn = await azdata.connection.getConnection(ownerUri);
         var doc = vscode.workspace.textDocuments.find(td => td.uri.toString() === ownerUri);
 
-        setTimeout(() => {
+        setTimeout(async () => {
             if (!doc) {
                 // TODO Report error.
                 return;
@@ -124,32 +147,19 @@ class QueryProvider implements azdata.QueryProvider {
                     endColumn: lines[lines.length - 1].length
                 };
             }
-            
+
             const range = new vscode.Range(selection.startLine, selection.startColumn, selection.endLine, selection.endColumn);
             text = doc.getText(range);
 
-            const resultSetSummary: azdata.ResultSetSummary = {
-                id: 0,
-                batchId: 0,
-                rowCount: 2,
-                columnInfo: [
-                    <azdata.IDbColumn>{
-                        columnName: "Name"
-                    },
-                    <azdata.IDbColumn>{
-                        columnName: "Number"
-                    },
-                    <azdata.IDbColumn>{
-                        columnName: "DateAndTime"
-                    }
-                ],
-                complete: true
-            };
+            const query = new QueryRunner(conn, text);
+            this.activeQueries[ownerUri] = query;
+
+            const start = new Date();
 
             const batch: azdata.BatchSummary = <azdata.BatchSummary>{
                 id: 0,
                 selection: selection,
-                executionStart: new Date().toISOString()
+                executionStart: start.toISOString()
             };
 
             this.onBatchStart.fire({
@@ -157,15 +167,52 @@ class QueryProvider implements azdata.QueryProvider {
                 batchSummary: batch
             });
 
-            this.onResultSetAvailable.fire({
-                ownerUri,
-                resultSetSummary: resultSetSummary
-            });
+            try {
+                await query.execute();
 
-            batch.executionEnd = new Date().toISOString();
-            batch.executionElapsed = "00:00:02.289";
-            batch.hasError = false;
-            batch.resultSetSummaries = [resultSetSummary];
+                if (query.isCancelled()) {
+                    return;
+                }
+
+                for (const message of query.getMessages()) {
+                    this.onMessage.fire({
+                        ownerUri,
+                        message: {
+                            batchId: batch.id,
+                            isError: !!message.code,
+                            message: message.message
+                        }
+                    });
+                }
+
+                const resultSetSummaries = query.getResultSetSummaries();
+
+                for (const resultSetSummary of resultSetSummaries) {
+                    this.onResultSetAvailable.fire({
+                        ownerUri,
+                        resultSetSummary
+                    });
+                }
+
+                batch.hasError = false;
+                batch.resultSetSummaries = resultSetSummaries;
+            }
+            catch (error) {
+                batch.hasError = true;
+
+                this.onMessage.fire({
+                    ownerUri,
+                    message: {
+                        batchId: batch.id,
+                        isError: true,
+                        message: error instanceof Error ? error.message : `${error}`
+                    }
+                });
+        }
+
+            const end = new Date();
+            batch.executionEnd = end.toISOString();
+            batch.executionElapsed = toElapsed(end.getTime() - start.getTime());
 
             this.onBatchComplete.fire({
                 ownerUri,
@@ -192,55 +239,24 @@ class QueryProvider implements azdata.QueryProvider {
         throw new Error('Method not implemented.');
     }
     async getQueryRows(rowData: azdata.QueryExecuteSubsetParams): Promise<azdata.QueryExecuteSubsetResult> {
-        return await Promise.resolve({
-            message: "",
-            resultSubset: {
-                rowCount: 2,
-                rows: [
-                    [
-                        {
-                            displayValue: "Hello!",
-                            isNull: false,
-                            invariantCultureDisplayValue: "Hello!"
-                        },
-                        {
-                            displayValue: "24",
-                            isNull: false,
-                            invariantCultureDisplayValue: "24"
-                        },
-                        {
-                            displayValue: "2022-08-04T23:18:02.382",
-                            isNull: false,
-                            invariantCultureDisplayValue: "2022-08-04T23:18:02.382"
-                        }
-                    ],
-                    [
-                        {
-                            displayValue: "Hello 2!",
-                            isNull: false,
-                            invariantCultureDisplayValue: "Hello!"
-                        },
-                        {
-                            displayValue: "3",
-                            isNull: false,
-                            invariantCultureDisplayValue: "3"
-                        },
-                        {
-                            displayValue: "",
-                            isNull: true,
-                            invariantCultureDisplayValue: ""
-                        }
-                    ]
-                ]
-            }
-        });
+        const query = this.activeQueries[rowData.ownerUri];
+
+        if (!query) {
+            throw new Error("Query was not found.");
+        }
+
+        return Promise.resolve(query.getResultSet(rowData.resultSetIndex, rowData.rowsStartIndex, rowData.rowsCount));
     }
     disposeQuery(ownerUri: string): Thenable<void> {
-        throw new Error('Method not implemented.');
+        delete this.activeQueries[ownerUri];
+
+        return Promise.resolve();
     }
+
     saveResults(requestParams: azdata.SaveResultsRequestParams): Thenable<azdata.SaveResultRequestResult> {
         throw new Error('Method not implemented.');
     }
+
     setQueryExecutionOptions(ownerUri: string, options: azdata.QueryExecutionOptions): Thenable<void> {
         throw new Error('Method not implemented.');
     }
@@ -265,7 +281,7 @@ class QueryProvider implements azdata.QueryProvider {
         //throw new Error('Method not implemented.');
     }
     registerOnMessage(handler: (message: azdata.QueryExecuteMessageParams) => any): void {
-        //throw new Error('Method not implemented.');
+        this.onMessage.event(e => handler(e));
     }
 
     commitEdit(ownerUri: string): Thenable<void> {
