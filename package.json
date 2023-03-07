@@ -12,9 +12,7 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onConnect:magnus",
-		"onCommand:magnus.helloWorld",
-		"onCommand:magnus.showCurrentConnection"
+		"onConnect:magnus"
 	],
 	"main": "./out/extension.js",
 	"contributes": {

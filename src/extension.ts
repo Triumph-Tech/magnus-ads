@@ -64,7 +64,7 @@ class ConnectionProvider implements azdata.ConnectionProvider {
     }
 
     changeDatabase(connectionUri: string, newDatabase: string): Thenable<boolean> {
-        throw new Error('Method not implemented.');
+        return Promise.resolve(true);
     }
 
     rebuildIntelliSenseCache(connectionUri: string): Thenable<void> {
@@ -401,6 +401,88 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     }
 }
 
+class RockMetadataProvider implements azdata.MetadataProvider {
+    private handleId: number | undefined;
+
+    public get handle(): number | undefined {
+        return this.handleId;
+    }
+    public set handle(value: number | undefined) {
+        this.handleId = value;
+    }
+
+    public readonly providerId: string = "magnus";
+
+    public constructor() {
+
+    }
+
+    getMetadata(connectionUri: string): Thenable<azdata.ProviderMetadata> {
+        throw new Error('Method not implemented.');
+    }
+    getDatabases(connectionUri: string): Thenable<string[] | azdata.DatabaseInfo[]> {
+        return Promise.resolve(["Rock"]);
+    }
+    getTableInfo(connectionUri: string, metadata: azdata.ObjectMetadata): Thenable<azdata.ColumnMetadata[]> {
+        throw new Error('Method not implemented.');
+    }
+    getViewInfo(connectionUri: string, metadata: azdata.ObjectMetadata): Thenable<azdata.ColumnMetadata[]> {
+        throw new Error('Method not implemented.');
+    }
+}
+
+class RockCapabilitiesServiceProvider implements azdata.CapabilitiesProvider {
+    handle?: number | undefined;
+    public get providerId() {
+        return "magnus";
+    }
+
+    getServerCapabilities(client: azdata.DataProtocolClientCapabilities): Promise<azdata.DataProtocolServerCapabilities> {
+        return Promise.resolve({
+            protocolVersion: "1.0",
+            providerName: "magnus",
+            providerDisplayName: "Magnus",
+            connectionProvider: {
+                options: []
+            },
+            adminServicesProvider: <azdata.AdminServicesOptions>{},
+            // This seems to let the export feature work.
+            features: [
+                {
+                    enabled: true,
+                    featureName: 'serializationService',
+                    optionsMetadata: []
+                }
+            ],
+        });
+    }
+}
+
+class RockCompletionItemProvider implements vscode.CompletionItemProvider<vscode.CompletionItem> {
+    provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>> {
+        if (position.character !== 4) {
+            return [];
+        }
+
+        const item: vscode.CompletionItem = {
+            label: "DefinedType"
+        };
+
+        return [
+            {
+                label: "DefinedType"
+            },
+            {
+                label: "DefinedValue"
+            }
+        ];
+    }
+    resolveCompletionItem?(item: vscode.CompletionItem, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CompletionItem> {
+        return item;
+    }
+
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Congratulations, your extension "magnus" is now active!');
 
@@ -408,6 +490,9 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(azdata.dataprotocol.registerConnectionProvider(connectionProvider));
     context.subscriptions.push(azdata.dataprotocol.registerQueryProvider(new QueryProvider(connectionProvider)));
     context.subscriptions.push(azdata.dataprotocol.registerObjectExplorerProvider(new ObjectExplorerProvider()));
+    context.subscriptions.push(azdata.dataprotocol.registerMetadataProvider(new RockMetadataProvider()));
+    context.subscriptions.push(azdata.dataprotocol.registerCapabilitiesServiceProvider(new RockCapabilitiesServiceProvider()));
+    context.subscriptions.push(vscode.languages.registerCompletionItemProvider("sql", new RockCompletionItemProvider(), ".", "-", ":", "\\", "[", "\""));
 }
 
 export function deactivate() {
