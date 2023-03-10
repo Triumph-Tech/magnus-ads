@@ -3,20 +3,18 @@ import { Api } from './api';
 import { ExecuteQueryResult, QueryColumn, QueryMessage } from './types';
 
 export class QueryRunner {
-    private connection: azdata.connection.ConnectionProfile;
+    private api: Api;
     private query: string;
     private cancelled: boolean = false;
     private result?: ExecuteQueryResult;
 
-    constructor(connection: azdata.connection.ConnectionProfile, query: string) {
-        this.connection = connection;
+    constructor(api: Api, query: string) {
+        this.api = api;
         this.query = query;
     }
 
     public async execute(): Promise<void> {
-        const api = new Api(this.connection.serverName, this.connection.userName, this.connection.password);
-
-        this.result = await api.executeQuery(this.query);
+        this.result = await this.api.executeQuery(this.query);
     }
 
     public cancel(): void {

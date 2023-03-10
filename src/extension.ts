@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as azdata from 'azdata';
+import { v4 } from 'uuid';
 import { QueryRunner } from './queryRunner';
+import { Api } from './api';
 
 function toElapsed(totalMilliseconds: number): string {
     const hours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
@@ -15,23 +17,72 @@ function toElapsed(totalMilliseconds: number): string {
     return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`
 }
 
+type Connection = {
+    api?: Api;
+
+    cancelled?: boolean;
+};
+
 class ConnectionProvider implements azdata.ConnectionProvider {
     handle?: number | undefined;
     public readonly providerId: string = "magnus";
 
+    private connections: Record<string, Connection> = {};
+    private info: azdata.ConnectionInfoSummary[] = [];
+
     private onConnectionComplete: vscode.EventEmitter<azdata.ConnectionInfoSummary> = new vscode.EventEmitter();
 
+    public constructor() {
+    }
+
+    public getConnectionApi(connectionId: string): Api | undefined {
+        return this.connections[connectionId]?.api;
+    }
+
+    public renameUri(newUri: string, oldUri: string): void {
+        const api = this.connections[oldUri];
+
+        if (!api) {
+            return;
+        }
+
+        delete this.connections[oldUri];
+        this.connections[newUri] = api;
+    }
+
     async connect(connectionUri: string, connectionInfo: azdata.ConnectionInfo): Promise<boolean> {
-        this.onConnectionComplete.fire({
-            connectionId: "123",
+        const connection: Connection = {};
+
+        this.connections[connectionUri] = connection;
+
+        try {
+            const api = await Api.connect(connectionInfo.options.server, connectionInfo.options.user, connectionInfo.options.password);
+
+            if (connection.cancelled) {
+                return false;
+            }
+
+            connection.api = api;
+        }
+        catch (error) {
+            this.onConnectionComplete.fire(<azdata.ConnectionInfoSummary>{
+                ownerUri: connectionUri,
+                errorMessage: error instanceof Error ? error.message : String(error)
+            });
+
+            return false;
+        }
+
+        const info = {
+            connectionId: v4(),
             ownerUri: connectionUri,
             messages: "",
             errorMessage: "",
             errorNumber: 0,
             connectionSummary: {
-                serverName: connectionInfo.options["server"],
+                serverName: connectionInfo.options.server,
                 databaseName: "Rock",
-                userName: connectionInfo.options["username"]
+                userName: connectionInfo.options.user
             },
             serverInfo: {
                 serverReleaseVersion: 1,
@@ -44,26 +95,38 @@ class ConnectionProvider implements azdata.ConnectionProvider {
                 osVersion: "",
                 options: {}
             }
-        });
+        };
+
+        this.info.push(info);
+        this.onConnectionComplete.fire(info);
+
+        return true;
+    }
+
+    disconnect(connectionUri: string): Promise<boolean> {
+        if (this.connections[connectionUri]) {
+            delete this.connections[connectionUri];
+        }
 
         return Promise.resolve(true);
     }
 
-    disconnect(connectionUri: string): Thenable<boolean> {
-        throw new Error('Method not implemented.');
+    cancelConnect(connectionUri: string): Promise<boolean> {
+        if (this.connections[connectionUri]) {
+            this.connections[connectionUri].cancelled = true;
+            delete this.connections[connectionUri];
+        }
+
+        return Promise.resolve(true);
     }
 
-    cancelConnect(connectionUri: string): Thenable<boolean> {
-        throw new Error('Method not implemented.');
-    }
-
-    listDatabases(connectionUri: string): Thenable<azdata.ListDatabasesResult> {
+    listDatabases(connectionUri: string): Promise<azdata.ListDatabasesResult> {
         return Promise.resolve({
             databaseNames: ["Rock"]
         });
     }
 
-    changeDatabase(connectionUri: string, newDatabase: string): Thenable<boolean> {
+    changeDatabase(connectionUri: string, newDatabase: string): Promise<boolean> {
         return Promise.resolve(true);
     }
 
@@ -73,6 +136,14 @@ class ConnectionProvider implements azdata.ConnectionProvider {
 
     getConnectionString(connectionUri: string, includePassword: boolean): Thenable<string> {
         throw new Error('Method not implemented.');
+    }
+
+    buildConnectionInfo(connectionString: string): Thenable<azdata.ConnectionInfo> {
+        return Promise.resolve({
+            options: {
+                test: 123
+            }
+        });
     }
 
     registerOnConnectionComplete(handler: (connSummary: azdata.ConnectionInfoSummary) => any): void {
@@ -106,8 +177,8 @@ class QueryProvider implements azdata.QueryProvider {
         this.connectionProvider = connectionProvider;
     }
 
-    public connectionUriChanged(a: unknown, b: unknown): void {
-        return;
+    public connectionUriChanged(newUri: string, oldUri: string): void {
+        this.connectionProvider.renameUri(newUri, oldUri);
     }
 
     cancelQuery(ownerUri: string): Promise<azdata.QueryCancelResult> {
@@ -128,6 +199,13 @@ class QueryProvider implements azdata.QueryProvider {
 
     async runQuery(ownerUri: string, selection: azdata.ISelectionData | undefined, runOptions?: azdata.ExecutionPlanOptions | undefined): Promise<void> {
         const conn = await azdata.connection.getConnection(ownerUri);
+        const connectionUri = await azdata.connection.getUriForConnection(conn.connectionId);
+        const api = this.connectionProvider.getConnectionApi(connectionUri);
+
+        if (!api) {
+            throw new Error("Not connected to server.");
+        }
+
         var doc = vscode.workspace.textDocuments.find(td => td.uri.toString() === ownerUri);
 
         setTimeout(async () => {
@@ -151,7 +229,7 @@ class QueryProvider implements azdata.QueryProvider {
             const range = new vscode.Range(selection.startLine, selection.startColumn, selection.endLine, selection.endColumn);
             text = doc.getText(range);
 
-            const query = new QueryRunner(conn, text);
+            const query = new QueryRunner(api, text);
             this.activeQueries[ownerUri] = query;
 
             const start = new Date();
@@ -208,7 +286,7 @@ class QueryProvider implements azdata.QueryProvider {
                         message: error instanceof Error ? error.message : `${error}`
                     }
                 });
-        }
+            }
 
             const end = new Date();
             batch.executionEnd = end.toISOString();
@@ -229,15 +307,19 @@ class QueryProvider implements azdata.QueryProvider {
     runQueryStatement(ownerUri: string, line: number, column: number): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     runQueryString(ownerUri: string, queryString: string): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     runQueryAndReturn(ownerUri: string, queryString: string): Thenable<azdata.SimpleExecuteResult> {
         throw new Error('Method not implemented.');
     }
+
     parseSyntax(ownerUri: string, query: string): Thenable<azdata.SyntaxParseResult> {
         throw new Error('Method not implemented.');
     }
+
     async getQueryRows(rowData: azdata.QueryExecuteSubsetParams): Promise<azdata.QueryExecuteSubsetResult> {
         const query = this.activeQueries[rowData.ownerUri];
 
@@ -247,6 +329,7 @@ class QueryProvider implements azdata.QueryProvider {
 
         return Promise.resolve(query.getResultSet(rowData.resultSetIndex, rowData.rowsStartIndex, rowData.rowsCount));
     }
+
     disposeQuery(ownerUri: string): Thenable<void> {
         delete this.activeQueries[ownerUri];
 
@@ -280,44 +363,57 @@ class QueryProvider implements azdata.QueryProvider {
     registerOnResultSetUpdated(handler: (resultSetInfo: azdata.QueryExecuteResultSetNotificationParams) => any): void {
         //throw new Error('Method not implemented.');
     }
+
     registerOnMessage(handler: (message: azdata.QueryExecuteMessageParams) => any): void {
         this.onMessage.event(e => handler(e));
     }
 
+    // #region Cell Editing
+
     commitEdit(ownerUri: string): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     createRow(ownerUri: string): Thenable<azdata.EditCreateRowResult> {
         throw new Error('Method not implemented.');
     }
+
     deleteRow(ownerUri: string, rowId: number): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     disposeEdit(ownerUri: string): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     initializeEdit(ownerUri: string, schemaName: string, objectName: string, objectType: string, rowLimit: number, queryString: string): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     revertCell(ownerUri: string, rowId: number, columnId: number): Thenable<azdata.EditRevertCellResult> {
         throw new Error('Method not implemented.');
     }
+
     revertRow(ownerUri: string, rowId: number): Thenable<void> {
         throw new Error('Method not implemented.');
     }
+
     updateCell(ownerUri: string, rowId: number, columnId: number, newValue: string): Thenable<azdata.EditUpdateCellResult> {
         throw new Error('Method not implemented.');
     }
+
     getEditRows(rowData: azdata.EditSubsetParams): Thenable<azdata.EditSubsetResult> {
         throw new Error('Method not implemented.');
     }
+
     registerOnEditSessionReady(handler: (ownerUri: string, success: boolean, message: string) => any): void {
         //throw new Error('Method not implemented.');
     }
+
+    // #endregion
 }
 
 class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
-    private nextSessionId: number = 1;
     handle?: number | undefined;
     public readonly providerId: string = "magnus";
 
@@ -326,19 +422,18 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
 
     private expandCompleted?: (response: azdata.ObjectExplorerExpandInfo) => void;
 
-    public createNewSession(connInfo: azdata.ConnectionInfo): Promise<azdata.ObjectExplorerSessionResponse> {
-        console.log("createNewSession");
-
-        const sessionId = this.nextSessionId.toString();
-        this.nextSessionId++;
+    public async createNewSession(connInfo: azdata.ConnectionInfo): Promise<azdata.ObjectExplorerSessionResponse> {
+        const conn = await azdata.connection.getCurrentConnection();
+        const connectionUri = await azdata.connection.getUriForConnection(conn.connectionId);
+        // Get the API from the connectionUri like we do in query.
+        const sessionId = v4();
 
         // If this runs before we return it seems ADS does not recognize that we
         // actually created a session.
         setTimeout(() => {
-            console.log(`onSessionCreated sessionId ${sessionId}`);
             this.onSessionCreatedEmitter.fire({
                 success: true,
-                sessionId: sessionId,
+                sessionId,
                 rootNode: {
                     nodePath: "",
                     nodeType: "server",
@@ -386,6 +481,7 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     refreshNode(nodeInfo: azdata.ExpandNodeInfo): Thenable<boolean> {
         throw new Error('Method not implemented.');
     }
+    
     findNodes(findNodesInfo: azdata.FindNodesInfo): Thenable<azdata.ObjectExplorerFindNodesResponse> {
         throw new Error('Method not implemented.');
     }

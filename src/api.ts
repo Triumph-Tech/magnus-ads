@@ -57,22 +57,54 @@ function jsonParse<T>(json: string): T {
 
 export class Api {
     private hostname: string;
-    private username: string;
-    private password: string;
+    private authCookie: string;
 
-    public constructor(hostname: string, username: string, password: string) {
+    private constructor(hostname: string, authCookie: string) {
         this.hostname = hostname;
-        this.username = username;
-        this.password = password;
+        this.authCookie = authCookie;
+    }
+
+    public static async connect(hostname: string, username: string, password: string): Promise<Api> {
+        const loginUrl = `https://${hostname}/api/Auth/Login`;
+
+        const response = await axios.post(loginUrl, JSON.stringify({
+            username,
+            password
+        }));
+
+        if (response.status === 401) {
+            throw new Error("Invalid username or password.");
+        }
+        else if (response.status !== 200 && response.status !== 204) {
+            throw new Error("Unable to login, unknown error occurred.");
+        }
+
+        if (!response.headers["set-cookie"]) {
+            throw new Error("Invalid response received from the server.");
+        }
+
+        const cookie = response.headers["set-cookie"].find(c => c.startsWith(".ROCK="));
+
+        if (!cookie) {
+            throw new Error("Invalid response received from the server.");
+        }
+
+        const authCookie = cookie.split(";")[0];
+
+        return new Api(hostname, authCookie);
     }
 
     public async executeQuery(queryText: string): Promise<ExecuteQueryResult> {
-        const url = `https://${this.hostname}/api/sql/executeQuery`;
+        const url = `https://${this.hostname}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
         const data: ExecuteQueryRequest = {
             query: queryText
         };
 
-        const result = await axios.post<ExecuteQueryResult>(url, JSON.stringify(data));
+        const result = await axios.post<ExecuteQueryResult>(url, JSON.stringify(data), {
+            headers: {
+                "Cookie": this.authCookie
+            }
+        });
 
         if (result.status === 200) {
             return result.data;
