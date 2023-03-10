@@ -28,7 +28,6 @@ class ConnectionProvider implements azdata.ConnectionProvider {
     public readonly providerId: string = "magnus";
 
     private connections: Record<string, Connection> = {};
-    private info: azdata.ConnectionInfoSummary[] = [];
 
     private onConnectionComplete: vscode.EventEmitter<azdata.ConnectionInfoSummary> = new vscode.EventEmitter();
 
@@ -97,7 +96,6 @@ class ConnectionProvider implements azdata.ConnectionProvider {
             }
         };
 
-        this.info.push(info);
         this.onConnectionComplete.fire(info);
 
         return true;
@@ -431,6 +429,7 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
         // If this runs before we return it seems ADS does not recognize that we
         // actually created a session.
         setTimeout(() => {
+            // Call API to get details...
             this.onSessionCreatedEmitter.fire({
                 success: true,
                 sessionId,
@@ -441,11 +440,11 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
                     isLeaf: false
                 }
             });
-        }, 1);
+        }, 10);
 
-        return Promise.resolve({
+        return {
             sessionId: sessionId
-        });
+        };
     }
 
     closeSession(closeSessionInfo: azdata.ObjectExplorerCloseSessionInfo): Thenable<azdata.ObjectExplorerCloseSessionResponse> {
@@ -481,7 +480,7 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     refreshNode(nodeInfo: azdata.ExpandNodeInfo): Thenable<boolean> {
         throw new Error('Method not implemented.');
     }
-    
+
     findNodes(findNodesInfo: azdata.FindNodesInfo): Thenable<azdata.ObjectExplorerFindNodesResponse> {
         throw new Error('Method not implemented.');
     }
