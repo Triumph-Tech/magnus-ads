@@ -110,7 +110,17 @@ export class Api {
             return result.data;
         }
         else {
-            throw new Error("Request failed.");
+            const errorData = result.data as unknown as Record<string, string>;
+
+            if (errorData.exceptionMessage) {
+                throw new Error(errorData.exceptionMessage);
+            }
+            else if (errorData.message) {
+                throw new Error(errorData.message);
+            }
+            else {
+                throw new Error("Request failed.");
+            }
         }
     }
 }
