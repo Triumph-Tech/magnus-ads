@@ -1,5 +1,5 @@
 import { Axios, AxiosRequestConfig, Method } from "axios";
-import { ExecuteQueryRequest, ExecuteQueryResult } from "./types";
+import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag } from "./types";
 
 const axios = new Axios({
     headers: {
@@ -19,6 +19,25 @@ const axios = new Axios({
         return data;
     }
 });
+
+function getDefaultError(data: unknown): Error {
+    if (!data || typeof data !== "object") {
+        return new Error("Unable to complete request.");
+    }
+
+    const errorData = data as Record<string, string>;
+
+    if (errorData.exceptionMessage) {
+        return new Error(errorData.exceptionMessage);
+    }
+    else if (errorData.message) {
+        return new Error(errorData.message);
+    }
+    else {
+        return new Error("Request failed but did not provide a reason.");
+    }
+
+}
 
 /**
  * A special reviver method for JSON.parse that forces any object keys to be
@@ -110,17 +129,27 @@ export class Api {
             return result.data;
         }
         else {
-            const errorData = result.data as unknown as Record<string, string>;
+            throw getDefaultError(result.data);
+        }
+    }
 
-            if (errorData.exceptionMessage) {
-                throw new Error(errorData.exceptionMessage);
+    public async getChildNodes(nodeId: string | undefined): Promise<ObjectExplorerNodeBag[]> {
+        const url = `https://${this.hostname}/api/TriumphTech/Magnus/Sql/ObjectExplorerNodes`;
+        const data: ObjectExplorerNodesRequestBag = {
+            nodeId
+        };
+
+        const result = await axios.post<ObjectExplorerNodesResponseBag>(url, JSON.stringify(data), {
+            headers: {
+                "Cookie": this.authCookie
             }
-            else if (errorData.message) {
-                throw new Error(errorData.message);
-            }
-            else {
-                throw new Error("Request failed.");
-            }
+        });
+
+        if (result.status === 200) {
+            return result.data.nodes;
+        }
+        else {
+            throw getDefaultError(result.data);
         }
     }
 }

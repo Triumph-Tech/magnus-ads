@@ -36,3 +36,28 @@ export type QueryMessage = {
     lineNumber?: number | null;
 };
 
+export type ObjectExplorerNodesRequestBag = {
+    nodeId: string | undefined;
+};
+
+export type ObjectExplorerNodesResponseBag = {
+    nodes: ObjectExplorerNodeBag[];
+};
+
+export type ObjectExplorerNodeBag = {
+    id: string;
+
+    type: ObjectExplorerNodeType;
+
+    name: string;
+};
+
+export enum ObjectExplorerNodeType {
+    DatabasesFolder = 0,
+
+    Database = 1,
+
+    TablesFolder = 2,
+
+    Table = 3
+}

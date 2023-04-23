@@ -3,6 +3,11 @@ import * as azdata from 'azdata';
 import { v4 } from 'uuid';
 import { QueryRunner } from './queryRunner';
 import { Api } from './api';
+import { ObjectExplorerNodeBag, ObjectExplorerNodeType } from './types';
+
+function runClientRequest(callback: (() => void | Promise<void>)) {
+    setTimeout(callback, 10);
+}
 
 function toElapsed(totalMilliseconds: number): string {
     const hours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
@@ -15,6 +20,45 @@ function toElapsed(totalMilliseconds: number): string {
     const milliseconds = totalMilliseconds % 1000;
 
     return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`
+}
+
+function getObjectExplorerNodeIcon(nodeBag: ObjectExplorerNodeBag): azdata.SqlThemeIcon | undefined {
+    switch (nodeBag.type) {
+        case ObjectExplorerNodeType.DatabasesFolder:
+        case ObjectExplorerNodeType.TablesFolder:
+            return azdata.SqlThemeIcon.Folder;
+
+        case ObjectExplorerNodeType.Database:
+            return azdata.SqlThemeIcon.Database;
+        
+        case ObjectExplorerNodeType.Table:
+            return azdata.SqlThemeIcon.Table;
+
+        default:
+            return undefined;
+    }
+}
+
+function getObjectExplorerNodeIsLeaf(nodeBag: ObjectExplorerNodeBag): boolean {
+    switch (nodeBag.type) {
+        case ObjectExplorerNodeType.DatabasesFolder:
+        case ObjectExplorerNodeType.TablesFolder:
+        case ObjectExplorerNodeType.Database:
+            return false;
+
+        default:
+            return true;
+    }
+}
+
+function getObjectExplorerNodeInfo(nodeBag: ObjectExplorerNodeBag): azdata.NodeInfo {
+    return {
+        nodePath: nodeBag.id,
+        nodeType: nodeBag.type.toString(),
+        label: nodeBag.name,
+        icon: getObjectExplorerNodeIcon(nodeBag),
+        isLeaf: getObjectExplorerNodeIsLeaf(nodeBag)
+    };
 }
 
 type Connection = {
@@ -206,7 +250,7 @@ class QueryProvider implements azdata.QueryProvider {
 
         var doc = vscode.workspace.textDocuments.find(td => td.uri.toString() === ownerUri);
 
-        setTimeout(async () => {
+        runClientRequest(async () => {
             if (!doc) {
                 // TODO Report error.
                 return;
@@ -299,7 +343,7 @@ class QueryProvider implements azdata.QueryProvider {
                 ownerUri,
                 batchSummaries: [batch]
             });
-        }, 0);
+        });
     }
 
     runQueryStatement(ownerUri: string, line: number, column: number): Thenable<void> {
@@ -415,32 +459,48 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     handle?: number | undefined;
     public readonly providerId: string = "magnus";
 
+    private connectionProvider: ConnectionProvider;
+
+    private readonly sessions: Record<string, Api> = {};
+
     private onSessionCreatedEmitter: vscode.EventEmitter<azdata.ObjectExplorerSession> = new vscode.EventEmitter();
     private onSessionCreated: vscode.Event<azdata.ObjectExplorerSession> = this.onSessionCreatedEmitter.event;
 
-    private expandCompleted?: (response: azdata.ObjectExplorerExpandInfo) => void;
+    private readonly onExpandCompletedEmitter = new vscode.EventEmitter<azdata.ObjectExplorerExpandInfo>();
+    private readonly onExpandCompleted = this.onExpandCompletedEmitter.event;
+
+
+    constructor(connectionProvider: ConnectionProvider) {
+        this.connectionProvider = connectionProvider;
+    }
 
     public async createNewSession(connInfo: azdata.ConnectionInfo): Promise<azdata.ObjectExplorerSessionResponse> {
         const conn = await azdata.connection.getCurrentConnection();
         const connectionUri = await azdata.connection.getUriForConnection(conn.connectionId);
+        const api = this.connectionProvider.getConnectionApi(connectionUri);
+
+        if (!api) {
+            throw new Error("Unable to locate server connection.");
+        }
+
         // Get the API from the connectionUri like we do in query.
         const sessionId = v4();
 
-        // If this runs before we return it seems ADS does not recognize that we
-        // actually created a session.
-        setTimeout(() => {
+        this.sessions[sessionId] = api;
+
+        runClientRequest(() => {
             // Call API to get details...
             this.onSessionCreatedEmitter.fire({
                 success: true,
                 sessionId,
                 rootNode: {
                     nodePath: "",
-                    nodeType: "server",
+                    nodeType: "",
                     label: "Rock Server",
                     isLeaf: false
                 }
             });
-        }, 10);
+        });
 
         return {
             sessionId: sessionId
@@ -448,37 +508,49 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     }
 
     closeSession(closeSessionInfo: azdata.ObjectExplorerCloseSessionInfo): Thenable<azdata.ObjectExplorerCloseSessionResponse> {
-        throw new Error('Method not implemented.');
+        if (!closeSessionInfo.sessionId) {
+            throw new Error("Invalid call");
+        }
+
+        delete this.sessions[closeSessionInfo.sessionId];
+
+        return Promise.resolve<azdata.ObjectExplorerCloseSessionResponse>({
+            sessionId: closeSessionInfo.sessionId!,
+            success: true
+        });
     }
 
-    public expandNode(nodeInfo: azdata.ExpandNodeInfo): Promise<boolean> {
-        console.log(`expandNode on session ${nodeInfo.sessionId}`);
-
-        if (!nodeInfo.sessionId) {
+    public async expandNode(nodeInfo: azdata.ExpandNodeInfo): Promise<boolean> {
+        if (!nodeInfo.sessionId || !this.sessions[nodeInfo.sessionId]) {
             return Promise.resolve(false);
         }
 
-        if (this.expandCompleted) {
-            console.log(`expandCompleted on session ${nodeInfo.sessionId}`);
-            this.expandCompleted({
-                sessionId: nodeInfo.sessionId,
-                nodePath: nodeInfo.nodePath ?? "",
-                nodes: [
-                    {
-                        nodePath: nodeInfo.nodePath + "/tables",
-                        nodeType: "",
-                        label: "Tables",
-                        isLeaf: true
-                    }
-                ]
-            });
-        }
+        const api = this.sessions[nodeInfo.sessionId];
+
+        runClientRequest(async () => {
+            try {
+                const children = await api.getChildNodes(nodeInfo.nodePath ? nodeInfo.nodePath : undefined);
+
+                this.onExpandCompletedEmitter.fire({
+                    sessionId: nodeInfo.sessionId,
+                    nodePath: nodeInfo.nodePath ?? "",
+                    nodes: children.map(n => getObjectExplorerNodeInfo(n))
+                });
+            } catch (error) {
+                this.onExpandCompletedEmitter.fire({
+                    sessionId: nodeInfo.sessionId,
+                    nodePath: nodeInfo.nodePath ?? "",
+                    nodes: [],
+                    errorMessage: error instanceof Error ? error.message : String(error)
+                });
+            }
+        });
 
         return Promise.resolve(true);
     }
 
     refreshNode(nodeInfo: azdata.ExpandNodeInfo): Thenable<boolean> {
-        throw new Error('Method not implemented.');
+        return this.expandNode(nodeInfo);
     }
 
     findNodes(findNodesInfo: azdata.FindNodesInfo): Thenable<azdata.ObjectExplorerFindNodesResponse> {
@@ -486,13 +558,12 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     }
 
     registerOnSessionCreated(handler: (response: azdata.ObjectExplorerSession) => any): void {
-        console.log("registerOnSessionCreated");
-        this.onSessionCreated(e => handler(e));
+        this.onSessionCreated(handler);
     }
 
     registerOnExpandCompleted(handler: (response: azdata.ObjectExplorerExpandInfo) => any): void {
-        console.log("registerOnExpandCompleted");
-        this.expandCompleted = handler;
+        console.log("registered onExpandCompleted");
+        this.onExpandCompleted(handler);
     }
 }
 
@@ -553,30 +624,30 @@ class RockCapabilitiesServiceProvider implements azdata.CapabilitiesProvider {
     }
 }
 
-class RockCompletionItemProvider implements vscode.CompletionItemProvider<vscode.CompletionItem> {
-    provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>> {
-        if (position.character !== 4) {
-            return [];
-        }
+// class RockCompletionItemProvider implements vscode.CompletionItemProvider<vscode.CompletionItem> {
+//     provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>> {
+//         if (position.character !== 4) {
+//             return [];
+//         }
 
-        const item: vscode.CompletionItem = {
-            label: "DefinedType"
-        };
+//         const item: vscode.CompletionItem = {
+//             label: "DefinedType"
+//         };
 
-        return [
-            {
-                label: "DefinedType"
-            },
-            {
-                label: "DefinedValue"
-            }
-        ];
-    }
-    resolveCompletionItem?(item: vscode.CompletionItem, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CompletionItem> {
-        return item;
-    }
+//         return [
+//             {
+//                 label: "DefinedType"
+//             },
+//             {
+//                 label: "DefinedValue"
+//             }
+//         ];
+//     }
+//     resolveCompletionItem?(item: vscode.CompletionItem, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CompletionItem> {
+//         return item;
+//     }
 
-}
+// }
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Congratulations, your extension "magnus" is now active!');
@@ -584,10 +655,10 @@ export function activate(context: vscode.ExtensionContext) {
     const connectionProvider = new ConnectionProvider();
     context.subscriptions.push(azdata.dataprotocol.registerConnectionProvider(connectionProvider));
     context.subscriptions.push(azdata.dataprotocol.registerQueryProvider(new QueryProvider(connectionProvider)));
-    context.subscriptions.push(azdata.dataprotocol.registerObjectExplorerProvider(new ObjectExplorerProvider()));
+    context.subscriptions.push(azdata.dataprotocol.registerObjectExplorerProvider(new ObjectExplorerProvider(connectionProvider)));
     context.subscriptions.push(azdata.dataprotocol.registerMetadataProvider(new RockMetadataProvider()));
     context.subscriptions.push(azdata.dataprotocol.registerCapabilitiesServiceProvider(new RockCapabilitiesServiceProvider()));
-    context.subscriptions.push(vscode.languages.registerCompletionItemProvider("sql", new RockCompletionItemProvider(), ".", "-", ":", "\\", "[", "\""));
+    //context.subscriptions.push(vscode.languages.registerCompletionItemProvider("sql", new RockCompletionItemProvider(), ".", "-", ":", "\\", "[", "\""));
 }
 
 export function deactivate() {
