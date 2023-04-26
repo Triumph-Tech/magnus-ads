@@ -4,6 +4,7 @@ import { v4 } from 'uuid';
 import { QueryRunner } from './queryRunner';
 import { Api } from './api';
 import { ObjectExplorerNodeBag, ObjectExplorerNodeType } from './types';
+import { ExportToCsv, ExportToJson, IExportSerializer } from './serializers/exportToCsv';
 
 function runClientRequest(callback: (() => void | Promise<void>)) {
     setTimeout(callback, 10);
@@ -378,8 +379,38 @@ class QueryProvider implements azdata.QueryProvider {
         return Promise.resolve();
     }
 
-    saveResults(requestParams: azdata.SaveResultsRequestParams): Thenable<azdata.SaveResultRequestResult> {
-        throw new Error('Method not implemented.');
+    async saveResults(requestParams: azdata.SaveResultsRequestParams): Promise<azdata.SaveResultRequestResult> {
+        const query = this.activeQueries[requestParams.ownerUri];
+        const summary = query.getResultSetSummaries()[requestParams.resultSetIndex];
+        const rowCount = summary.rowCount;
+        const rowData = query.getResultSet(requestParams.resultSetIndex, 0, rowCount);
+        let serializer: IExportSerializer | undefined;
+
+        if (requestParams.resultFormat === "csv") {
+            serializer = new ExportToCsv(requestParams);
+        }
+        else if (requestParams.resultFormat === "json") {
+            serializer = new ExportToJson(requestParams);
+        }
+
+        if (serializer) {
+            await serializer.open(summary);
+
+            for (const row of rowData.resultSubset.rows) {
+                serializer.writeRow(row);
+            }
+
+            await serializer.close();
+
+            return {
+                messages: ""
+            };
+        }
+        else {
+            return {
+                messages: "Format is not supported."
+            };
+        }
     }
 
     setQueryExecutionOptions(ownerUri: string, options: azdata.QueryExecutionOptions): Thenable<void> {
