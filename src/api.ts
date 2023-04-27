@@ -75,16 +75,25 @@ function jsonParse<T>(json: string): T {
 }
 
 export class Api {
+    private baseUrl: string;
     private hostname: string;
     private authCookie: string;
 
     private constructor(hostname: string, authCookie: string) {
         this.hostname = hostname;
         this.authCookie = authCookie;
+
+        if (hostname.includes("://")) {
+            this.baseUrl = hostname;
+        }
+        else {
+            this.baseUrl = `https://${hostname}`;
+        }
     }
 
     public static async connect(hostname: string, username: string, password: string): Promise<Api> {
-        const loginUrl = `https://${hostname}/api/Auth/Login`;
+        let baseUrl = hostname.includes("://") ? hostname : `https://${hostname}`;
+        const loginUrl = `${baseUrl}/api/Auth/Login`;
 
         const response = await axios.post(loginUrl, JSON.stringify({
             username,
@@ -114,7 +123,7 @@ export class Api {
     }
 
     public async executeQuery(queryText: string): Promise<ExecuteQueryResult> {
-        const url = `https://${this.hostname}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
+        const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
         const data: ExecuteQueryRequest = {
             query: queryText
         };
@@ -134,7 +143,7 @@ export class Api {
     }
 
     public async getChildNodes(nodeId: string | undefined): Promise<ObjectExplorerNodeBag[]> {
-        const url = `https://${this.hostname}/api/TriumphTech/Magnus/Sql/ObjectExplorerNodes`;
+        const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ObjectExplorerNodes`;
         const data: ObjectExplorerNodesRequestBag = {
             nodeId
         };
