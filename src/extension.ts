@@ -527,10 +527,12 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
         this.connectionProvider = connectionProvider;
     }
 
-    public async createNewSession(connInfo: azdata.ConnectionInfo): Promise<azdata.ObjectExplorerSessionResponse> {
-        const conn = await azdata.connection.getCurrentConnection();
-        const connectionUri = await azdata.connection.getUriForConnection(conn.connectionId);
-        const api = this.connectionProvider.getConnectionApi(connectionUri);
+    public async createNewSession(connectionInfo: azdata.ConnectionInfo): Promise<azdata.ObjectExplorerSessionResponse> {
+        const api = await Api.connect(connectionInfo.options.server, connectionInfo.options.user, connectionInfo.options.password);
+
+        // const conn = await azdata.connection.getCurrentConnection();
+        // const connectionUri = await azdata.connection.getUriForConnection(conn.connectionId);
+        // const api = this.connectionProvider.getConnectionApi(connectionUri);
 
         if (!api) {
             throw new Error("Unable to locate server connection.");
