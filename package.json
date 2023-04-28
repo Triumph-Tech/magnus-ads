@@ -96,6 +96,35 @@
 					"isArray": false
 				}
 			]
+		},
+		"dashboard": {
+			"provider": "magnus",
+			"flavors": [
+				{
+					"flavor": "default",
+					"conditions": [],
+					"serverProperties": [
+						{
+							"displayName": "Rock Version",
+							"value": "rockVersion"
+						},
+						{
+							"displayName": "OS Version",
+							"value": "osVersion"
+						},
+						{
+							"displayName": "SQL Edition",
+							"value": "sqlEdition"
+						},
+						{
+							"displayName": "SQL Version",
+							"value": "sqlVersion"
+						}
+					],
+					"databaseProperties": [],
+					"databasesListProperties": []
+				}
+			]
 		}
 	},
 	"scripts": {

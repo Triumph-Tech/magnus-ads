@@ -61,3 +61,18 @@ export enum ObjectExplorerNodeType {
 
     Table = 3
 }
+
+export type ConnectRequestBag = {
+};
+
+export type ConnectResponseBag = {
+    databaseName: string;
+
+    oSVersion: string;
+
+    rockVersion: string;
+
+    sqlEdition: string;
+
+    sqlVersion: string;
+};

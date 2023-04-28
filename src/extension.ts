@@ -6,6 +6,17 @@ import { Api } from './api';
 import { ObjectExplorerNodeBag, ObjectExplorerNodeType } from './types';
 import { ExportToCsv, ExportToJson, IExportSerializer } from './serializers/exportToCsv';
 
+/**
+ * Most parts of Azure Data Studio we are dealing with are expecting to
+ * talk to a remote language server. It has expectations of some delays
+ * for every call. Because of that, there are some bugs where sometimes
+ * the "response listener" isn't created until after the command function
+ * returns. But we have already sent the response in some cases because
+ * we don't need to talk to a remote language server. This tricks ADS
+ * into thinking that is happening by introducing a short delay.
+ * 
+ * @param callback The callback function to execute.
+ */
 function runClientRequest(callback: (() => void | Promise<void>)) {
     setTimeout(callback, 10);
 }
@@ -79,8 +90,8 @@ class ConnectionProvider implements azdata.ConnectionProvider {
     public constructor() {
     }
 
-    public getConnectionApi(connectionId: string): Api | undefined {
-        return this.connections[connectionId]?.api;
+    public getConnectionApi(connectionUri: string): Api | undefined {
+        return this.connections[connectionUri]?.api;
     }
 
     public renameUri(newUri: string, oldUri: string): void {
@@ -125,19 +136,24 @@ class ConnectionProvider implements azdata.ConnectionProvider {
             errorNumber: 0,
             connectionSummary: {
                 serverName: connectionInfo.options.server,
-                databaseName: "Rock",
+                databaseName: connection.api.serverDetails.databaseName,
                 userName: connectionInfo.options.user
             },
             serverInfo: {
                 serverReleaseVersion: 1,
                 engineEditionId: 1,
-                serverVersion: "1.0",
+                serverVersion: connection.api.serverDetails.rockVersion,
                 serverLevel: "",
-                serverEdition: "",
+                serverEdition: connection.api.serverDetails.sqlEdition,
                 isCloud: true,
                 azureVersion: 1,
-                osVersion: "",
-                options: {}
+                osVersion: connection.api.serverDetails.oSVersion,
+                options: {
+                    osVersion: connection.api.serverDetails.oSVersion,
+                    rockVersion: connection.api.serverDetails.rockVersion,
+                    sqlEdition: connection.api.serverDetails.sqlEdition,
+                    sqlVersion: connection.api.serverDetails.sqlVersion
+                }
             }
         };
 
@@ -163,9 +179,17 @@ class ConnectionProvider implements azdata.ConnectionProvider {
         return Promise.resolve(true);
     }
 
-    listDatabases(connectionUri: string): Promise<azdata.ListDatabasesResult> {
+    async listDatabases(connectionUri: string): Promise<azdata.ListDatabasesResult> {
+        const api = this.getConnectionApi(connectionUri);
+
+        if (!api) {
+            return Promise.resolve({
+                databaseNames: []
+            });
+        }
+
         return Promise.resolve({
-            databaseNames: ["Rock"]
+            databaseNames: [api.serverDetails.databaseName]
         });
     }
 
@@ -183,9 +207,7 @@ class ConnectionProvider implements azdata.ConnectionProvider {
 
     buildConnectionInfo(connectionString: string): Thenable<azdata.ConnectionInfo> {
         return Promise.resolve({
-            options: {
-                test: 123
-            }
+            options: {}
         });
     }
 
@@ -593,7 +615,6 @@ class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
     }
 
     registerOnExpandCompleted(handler: (response: azdata.ObjectExplorerExpandInfo) => any): void {
-        console.log("registered onExpandCompleted");
         this.onExpandCompleted(handler);
     }
 }
@@ -615,14 +636,24 @@ class RockMetadataProvider implements azdata.MetadataProvider {
     }
 
     getMetadata(connectionUri: string): Thenable<azdata.ProviderMetadata> {
-        throw new Error('Method not implemented.');
+        // Frankly, don't know what this is used by, so just return an empty
+        // result of metadata.
+        return Promise.resolve({
+            objectMetadata: []
+        });
     }
+
     getDatabases(connectionUri: string): Thenable<string[] | azdata.DatabaseInfo[]> {
-        return Promise.resolve(["Rock"]);
+        // This is the list of database that shows up in the main dashboard.
+        // For now, we don't want to show anything otherwise it just looks like
+        // we are missing stuff when they double click it.
+        return Promise.resolve([]);
     }
+
     getTableInfo(connectionUri: string, metadata: azdata.ObjectMetadata): Thenable<azdata.ColumnMetadata[]> {
         throw new Error('Method not implemented.');
     }
+
     getViewInfo(connectionUri: string, metadata: azdata.ObjectMetadata): Thenable<azdata.ColumnMetadata[]> {
         throw new Error('Method not implemented.');
     }
@@ -680,15 +711,45 @@ class RockCapabilitiesServiceProvider implements azdata.CapabilitiesProvider {
 
 // }
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log('Congratulations, your extension "magnus" is now active!');
+/**
+ * This class needs to exist for server properties to be supported.
+ */
+class RockAdminServicesProvider implements azdata.AdminServicesProvider {
+    public handle?: number | undefined;
+    public get providerId(): string {
+        return "magnus";
+    };
 
+    createDatabase(connectionUri: string, database: azdata.DatabaseInfo): Thenable<azdata.CreateDatabaseResponse> {
+        throw new Error('Method not implemented.');
+    }
+
+    createLogin(connectionUri: string, login: azdata.LoginInfo): Thenable<azdata.CreateLoginResponse> {
+        throw new Error('Method not implemented.');
+    }
+
+    getDefaultDatabaseInfo(connectionUri: string): Thenable<azdata.DatabaseInfo> {
+        // This information provides the properties when looking at a single
+        // database in the dashboard. But we don't have anything to show.
+        return Promise.resolve({
+            options: {}
+        });
+    }
+
+    getDatabaseInfo(connectionUri: string): Thenable<azdata.DatabaseInfo> {
+        return this.getDefaultDatabaseInfo(connectionUri);
+    }
+
+}
+
+export function activate(context: vscode.ExtensionContext) {
     const connectionProvider = new ConnectionProvider();
     context.subscriptions.push(azdata.dataprotocol.registerConnectionProvider(connectionProvider));
     context.subscriptions.push(azdata.dataprotocol.registerQueryProvider(new QueryProvider(connectionProvider)));
     context.subscriptions.push(azdata.dataprotocol.registerObjectExplorerProvider(new ObjectExplorerProvider(connectionProvider)));
     context.subscriptions.push(azdata.dataprotocol.registerMetadataProvider(new RockMetadataProvider()));
     context.subscriptions.push(azdata.dataprotocol.registerCapabilitiesServiceProvider(new RockCapabilitiesServiceProvider()));
+    context.subscriptions.push(azdata.dataprotocol.registerAdminServicesProvider(new RockAdminServicesProvider()));
     //context.subscriptions.push(vscode.languages.registerCompletionItemProvider("sql", new RockCompletionItemProvider(), ".", "-", ":", "\\", "[", "\""));
 }
 

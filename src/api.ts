@@ -1,5 +1,5 @@
 import { Axios, AxiosRequestConfig, Method } from "axios";
-import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag } from "./types";
+import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag, ConnectResponseBag } from "./types";
 
 const axios = new Axios({
     headers: {
@@ -76,12 +76,13 @@ function jsonParse<T>(json: string): T {
 
 export class Api {
     private baseUrl: string;
-    private hostname: string;
     private authCookie: string;
+    
+    public readonly serverDetails: ConnectResponseBag;
 
-    private constructor(hostname: string, authCookie: string) {
-        this.hostname = hostname;
+    private constructor(hostname: string, authCookie: string, connectBag: ConnectResponseBag) {
         this.authCookie = authCookie;
+        this.serverDetails = connectBag;
 
         if (hostname.includes("://")) {
             this.baseUrl = hostname;
@@ -119,7 +120,19 @@ export class Api {
 
         const authCookie = cookie.split(";")[0];
 
-        return new Api(hostname, authCookie);
+        const connectUrl = `${baseUrl}/api/TriumphTech/Magnus/Sql/Connect`;
+        const connectResponse = await axios.post<ConnectResponseBag>(connectUrl, JSON.stringify({}), {
+            headers: {
+                "Cookie": authCookie
+            }
+        });
+
+        if (connectResponse.status === 200) {
+            return new Api(hostname, authCookie, connectResponse.data);
+        }
+        else {
+            throw new Error("Unable to negotiate connection with the server.");
+        }
     }
 
     public async executeQuery(queryText: string): Promise<ExecuteQueryResult> {
