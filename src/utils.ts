@@ -12,3 +12,23 @@
 export function runClientRequest(callback: (() => void | Promise<void>)) {
     setTimeout(callback, 10);
 }
+
+/**
+ * Gets a string that represents the duration of the milliseconds.
+ * 
+ * @param totalMilliseconds The milliseconds to be converted to a time string.
+ * 
+ * @returns A string that represents the duration.
+ */
+export function toElapsedString(totalMilliseconds: number): string {
+    const hours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
+    totalMilliseconds = totalMilliseconds % (1000 * 60 * 60);
+
+    const minutes = Math.floor(totalMilliseconds / (1000 * 60));
+    totalMilliseconds = totalMilliseconds % (1000 * 60);
+
+    const seconds = Math.floor(totalMilliseconds / 1000);
+    const milliseconds = totalMilliseconds % 1000;
+
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`;
+}
