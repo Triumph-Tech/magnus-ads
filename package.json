@@ -18,14 +18,24 @@
 	"contributes": {
 		"commands": [
 			{
-				"command": "magnus.helloWorld",
-				"title": "Hello World"
-			},
-			{
-				"command": "magnus.showCurrentConnection",
-				"title": "Show Current Connection"
+				"command": "magnus.selectTop1000",
+				"title": "Select Top 1000"
 			}
 		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "magnus.selectTop1000",
+					"when": "false"
+				}
+			],
+			"objectExplorer/item/context": [
+				{
+					"command": "magnus.selectTop1000",
+					"when": "connectionProvider == magnus && nodeType == 3"
+				}
+			]
+		},
 		"connectionProvider": {
 			"providerId": "magnus",
 			"displayName": "Magnus",
@@ -41,19 +51,6 @@
 					"objectType": null,
 					"categoryValues": null,
 					"isRequired": true,
-					"isArray": false
-				},
-				{
-					"specialValueType": "databaseName",
-					"isIdentity": true,
-					"name": "database",
-					"displayName": "not used",
-					"groupName": "Source",
-					"valueType": "string",
-					"defaultValue": null,
-					"objectType": null,
-					"categoryValues": null,
-					"isRequired": false,
 					"isArray": false
 				},
 				{

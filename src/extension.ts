@@ -1,25 +1,11 @@
 import * as vscode from 'vscode';
 import * as azdata from 'azdata';
-import { v4 } from 'uuid';
 import { QueryRunner } from './queryRunner';
-import { Api } from './api';
-import { ObjectExplorerNodeBag, ObjectExplorerNodeType } from './types';
 import { ExportToCsv, ExportToJson, IExportSerializer } from './serializers/exportToCsv';
-
-/**
- * Most parts of Azure Data Studio we are dealing with are expecting to
- * talk to a remote language server. It has expectations of some delays
- * for every call. Because of that, there are some bugs where sometimes
- * the "response listener" isn't created until after the command function
- * returns. But we have already sent the response in some cases because
- * we don't need to talk to a remote language server. This tricks ADS
- * into thinking that is happening by introducing a short delay.
- * 
- * @param callback The callback function to execute.
- */
-function runClientRequest(callback: (() => void | Promise<void>)) {
-    setTimeout(callback, 10);
-}
+import { Commands } from './commands';
+import { ConnectionProvider } from './connectionProvider';
+import { runClientRequest } from './utils';
+import { ObjectExplorerProvider } from './objectExplorerProvider';
 
 function toElapsed(totalMilliseconds: number): string {
     const hours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
@@ -31,197 +17,7 @@ function toElapsed(totalMilliseconds: number): string {
     const seconds = Math.floor(totalMilliseconds / 1000);
     const milliseconds = totalMilliseconds % 1000;
 
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`
-}
-
-function getObjectExplorerNodeIcon(nodeBag: ObjectExplorerNodeBag): azdata.SqlThemeIcon | undefined {
-    switch (nodeBag.type) {
-        case ObjectExplorerNodeType.DatabasesFolder:
-        case ObjectExplorerNodeType.TablesFolder:
-            return azdata.SqlThemeIcon.Folder;
-
-        case ObjectExplorerNodeType.Database:
-            return azdata.SqlThemeIcon.Database;
-        
-        case ObjectExplorerNodeType.Table:
-            return azdata.SqlThemeIcon.Table;
-
-        default:
-            return undefined;
-    }
-}
-
-function getObjectExplorerNodeIsLeaf(nodeBag: ObjectExplorerNodeBag): boolean {
-    switch (nodeBag.type) {
-        case ObjectExplorerNodeType.DatabasesFolder:
-        case ObjectExplorerNodeType.TablesFolder:
-        case ObjectExplorerNodeType.Database:
-            return false;
-
-        default:
-            return true;
-    }
-}
-
-function getObjectExplorerNodeInfo(nodeBag: ObjectExplorerNodeBag): azdata.NodeInfo {
-    return {
-        nodePath: nodeBag.id,
-        nodeType: nodeBag.type.toString(),
-        label: nodeBag.name,
-        icon: getObjectExplorerNodeIcon(nodeBag),
-        isLeaf: getObjectExplorerNodeIsLeaf(nodeBag)
-    };
-}
-
-type Connection = {
-    api?: Api;
-
-    cancelled?: boolean;
-};
-
-class ConnectionProvider implements azdata.ConnectionProvider {
-    handle?: number | undefined;
-    public readonly providerId: string = "magnus";
-
-    private connections: Record<string, Connection> = {};
-
-    private onConnectionComplete: vscode.EventEmitter<azdata.ConnectionInfoSummary> = new vscode.EventEmitter();
-
-    public constructor() {
-    }
-
-    public getConnectionApi(connectionUri: string): Api | undefined {
-        return this.connections[connectionUri]?.api;
-    }
-
-    public renameUri(newUri: string, oldUri: string): void {
-        const api = this.connections[oldUri];
-
-        if (!api) {
-            return;
-        }
-
-        delete this.connections[oldUri];
-        this.connections[newUri] = api;
-    }
-
-    async connect(connectionUri: string, connectionInfo: azdata.ConnectionInfo): Promise<boolean> {
-        const connection: Connection = {};
-
-        this.connections[connectionUri] = connection;
-
-        try {
-            const api = await Api.connect(connectionInfo.options.server, connectionInfo.options.user, connectionInfo.options.password);
-
-            if (connection.cancelled) {
-                return false;
-            }
-
-            connection.api = api;
-        }
-        catch (error) {
-            this.onConnectionComplete.fire(<azdata.ConnectionInfoSummary>{
-                ownerUri: connectionUri,
-                errorMessage: error instanceof Error ? error.message : String(error)
-            });
-
-            return false;
-        }
-
-        const info = {
-            connectionId: v4(),
-            ownerUri: connectionUri,
-            messages: "",
-            errorMessage: "",
-            errorNumber: 0,
-            connectionSummary: {
-                serverName: connectionInfo.options.server,
-                databaseName: connection.api.serverDetails.databaseName,
-                userName: connectionInfo.options.user
-            },
-            serverInfo: {
-                serverReleaseVersion: 1,
-                engineEditionId: 1,
-                serverVersion: connection.api.serverDetails.rockVersion,
-                serverLevel: "",
-                serverEdition: connection.api.serverDetails.sqlEdition,
-                isCloud: true,
-                azureVersion: 1,
-                osVersion: connection.api.serverDetails.oSVersion,
-                options: {
-                    osVersion: connection.api.serverDetails.oSVersion,
-                    rockVersion: connection.api.serverDetails.rockVersion,
-                    sqlEdition: connection.api.serverDetails.sqlEdition,
-                    sqlVersion: connection.api.serverDetails.sqlVersion
-                }
-            }
-        };
-
-        this.onConnectionComplete.fire(info);
-
-        return true;
-    }
-
-    disconnect(connectionUri: string): Promise<boolean> {
-        if (this.connections[connectionUri]) {
-            delete this.connections[connectionUri];
-        }
-
-        return Promise.resolve(true);
-    }
-
-    cancelConnect(connectionUri: string): Promise<boolean> {
-        if (this.connections[connectionUri]) {
-            this.connections[connectionUri].cancelled = true;
-            delete this.connections[connectionUri];
-        }
-
-        return Promise.resolve(true);
-    }
-
-    async listDatabases(connectionUri: string): Promise<azdata.ListDatabasesResult> {
-        const api = this.getConnectionApi(connectionUri);
-
-        if (!api) {
-            return Promise.resolve({
-                databaseNames: []
-            });
-        }
-
-        return Promise.resolve({
-            databaseNames: [api.serverDetails.databaseName]
-        });
-    }
-
-    changeDatabase(connectionUri: string, newDatabase: string): Promise<boolean> {
-        return Promise.resolve(true);
-    }
-
-    rebuildIntelliSenseCache(connectionUri: string): Thenable<void> {
-        throw new Error('Method not implemented.');
-    }
-
-    getConnectionString(connectionUri: string, includePassword: boolean): Thenable<string> {
-        throw new Error('Method not implemented.');
-    }
-
-    buildConnectionInfo(connectionString: string): Thenable<azdata.ConnectionInfo> {
-        return Promise.resolve({
-            options: {}
-        });
-    }
-
-    registerOnConnectionComplete(handler: (connSummary: azdata.ConnectionInfoSummary) => any): void {
-        this.onConnectionComplete.event(e => handler(e));
-    }
-
-    registerOnIntelliSenseCacheComplete(handler: (connectionUri: string) => any): void {
-        //throw new Error('Method not implemented.');
-    }
-
-    registerOnConnectionChanged(handler: (changedConnInfo: azdata.ChangedConnectionInfo) => any): void {
-        //throw new Error('Method not implemented.');
-    }
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`;
 }
 
 class QueryProvider implements azdata.QueryProvider {
@@ -355,7 +151,7 @@ class QueryProvider implements azdata.QueryProvider {
 
             const end = new Date();
             batch.executionEnd = end.toISOString();
-            batch.executionElapsed = toElapsed(end.getTime() - start.getTime());
+            batch.executionElapsed = toElapsed(query.duration);
 
             this.onBatchComplete.fire({
                 ownerUri,
@@ -508,119 +304,6 @@ class QueryProvider implements azdata.QueryProvider {
     // #endregion
 }
 
-class ObjectExplorerProvider implements azdata.ObjectExplorerProvider {
-    handle?: number | undefined;
-    public readonly providerId: string = "magnus";
-
-    private connectionProvider: ConnectionProvider;
-
-    private readonly sessions: Record<string, Api> = {};
-
-    private onSessionCreatedEmitter: vscode.EventEmitter<azdata.ObjectExplorerSession> = new vscode.EventEmitter();
-    private onSessionCreated: vscode.Event<azdata.ObjectExplorerSession> = this.onSessionCreatedEmitter.event;
-
-    private readonly onExpandCompletedEmitter = new vscode.EventEmitter<azdata.ObjectExplorerExpandInfo>();
-    private readonly onExpandCompleted = this.onExpandCompletedEmitter.event;
-
-
-    constructor(connectionProvider: ConnectionProvider) {
-        this.connectionProvider = connectionProvider;
-    }
-
-    public async createNewSession(connectionInfo: azdata.ConnectionInfo): Promise<azdata.ObjectExplorerSessionResponse> {
-        const api = await Api.connect(connectionInfo.options.server, connectionInfo.options.user, connectionInfo.options.password);
-
-        // const conn = await azdata.connection.getCurrentConnection();
-        // const connectionUri = await azdata.connection.getUriForConnection(conn.connectionId);
-        // const api = this.connectionProvider.getConnectionApi(connectionUri);
-
-        if (!api) {
-            throw new Error("Unable to locate server connection.");
-        }
-
-        // Get the API from the connectionUri like we do in query.
-        const sessionId = v4();
-
-        this.sessions[sessionId] = api;
-
-        runClientRequest(() => {
-            // Call API to get details...
-            this.onSessionCreatedEmitter.fire({
-                success: true,
-                sessionId,
-                rootNode: {
-                    nodePath: "",
-                    nodeType: "",
-                    label: "Rock Server",
-                    isLeaf: false
-                }
-            });
-        });
-
-        return {
-            sessionId: sessionId
-        };
-    }
-
-    closeSession(closeSessionInfo: azdata.ObjectExplorerCloseSessionInfo): Thenable<azdata.ObjectExplorerCloseSessionResponse> {
-        if (!closeSessionInfo.sessionId) {
-            throw new Error("Invalid call");
-        }
-
-        delete this.sessions[closeSessionInfo.sessionId];
-
-        return Promise.resolve<azdata.ObjectExplorerCloseSessionResponse>({
-            sessionId: closeSessionInfo.sessionId!,
-            success: true
-        });
-    }
-
-    public async expandNode(nodeInfo: azdata.ExpandNodeInfo): Promise<boolean> {
-        if (!nodeInfo.sessionId || !this.sessions[nodeInfo.sessionId]) {
-            return Promise.resolve(false);
-        }
-
-        const api = this.sessions[nodeInfo.sessionId];
-
-        runClientRequest(async () => {
-            try {
-                const children = await api.getChildNodes(nodeInfo.nodePath ? nodeInfo.nodePath : undefined);
-
-                this.onExpandCompletedEmitter.fire({
-                    sessionId: nodeInfo.sessionId,
-                    nodePath: nodeInfo.nodePath ?? "",
-                    nodes: children.map(n => getObjectExplorerNodeInfo(n))
-                });
-            } catch (error) {
-                this.onExpandCompletedEmitter.fire({
-                    sessionId: nodeInfo.sessionId,
-                    nodePath: nodeInfo.nodePath ?? "",
-                    nodes: [],
-                    errorMessage: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
-
-        return Promise.resolve(true);
-    }
-
-    refreshNode(nodeInfo: azdata.ExpandNodeInfo): Thenable<boolean> {
-        return this.expandNode(nodeInfo);
-    }
-
-    findNodes(findNodesInfo: azdata.FindNodesInfo): Thenable<azdata.ObjectExplorerFindNodesResponse> {
-        throw new Error('Method not implemented.');
-    }
-
-    registerOnSessionCreated(handler: (response: azdata.ObjectExplorerSession) => any): void {
-        this.onSessionCreated(handler);
-    }
-
-    registerOnExpandCompleted(handler: (response: azdata.ObjectExplorerExpandInfo) => any): void {
-        this.onExpandCompleted(handler);
-    }
-}
-
 class RockMetadataProvider implements azdata.MetadataProvider {
     private handleId: number | undefined;
 
@@ -746,9 +429,12 @@ class RockAdminServicesProvider implements azdata.AdminServicesProvider {
 
 export function activate(context: vscode.ExtensionContext) {
     const connectionProvider = new ConnectionProvider();
+    const commands = new Commands(context);
+
+    context.subscriptions.push(commands);
     context.subscriptions.push(azdata.dataprotocol.registerConnectionProvider(connectionProvider));
     context.subscriptions.push(azdata.dataprotocol.registerQueryProvider(new QueryProvider(connectionProvider)));
-    context.subscriptions.push(azdata.dataprotocol.registerObjectExplorerProvider(new ObjectExplorerProvider(connectionProvider)));
+    context.subscriptions.push(azdata.dataprotocol.registerObjectExplorerProvider(new ObjectExplorerProvider(connectionProvider, commands)));
     context.subscriptions.push(azdata.dataprotocol.registerMetadataProvider(new RockMetadataProvider()));
     context.subscriptions.push(azdata.dataprotocol.registerCapabilitiesServiceProvider(new RockCapabilitiesServiceProvider()));
     context.subscriptions.push(azdata.dataprotocol.registerAdminServicesProvider(new RockAdminServicesProvider()));

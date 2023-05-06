@@ -7,6 +7,8 @@ export type ExecuteQueryRequest = {
 };
 
 export type ExecuteQueryResult = {
+    duration: number;
+
     messages: QueryMessage[];
 
     resultSets?: QueryResultSet[] | null;
@@ -59,7 +61,11 @@ export enum ObjectExplorerNodeType {
 
     TablesFolder = 2,
 
-    Table = 3
+    Table = 3,
+
+    ColumnsFolder = 4,
+
+    Column = 5
 }
 
 export type ConnectRequestBag = {
@@ -75,4 +81,12 @@ export type ConnectResponseBag = {
     sqlEdition: string;
 
     sqlVersion: string;
+};
+
+export type GetColumnNamesRequestBag = {
+    tableName: string;
+};
+
+export type GetColumnNamesResponseBag = {
+    columns: string[];
 };

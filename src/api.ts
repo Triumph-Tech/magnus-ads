@@ -1,5 +1,5 @@
-import { Axios, AxiosRequestConfig, Method } from "axios";
-import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag, ConnectResponseBag } from "./types";
+import { Axios} from "axios";
+import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag, ConnectResponseBag, GetColumnNamesRequestBag, GetColumnNamesResponseBag } from "./types";
 
 const axios = new Axios({
     headers: {
@@ -74,12 +74,26 @@ function jsonParse<T>(json: string): T {
     return JSON.parse(json, toCamelCaseReviver) as T;
 }
 
+/**
+ * Handles communication with the Rock server's API endpoints.
+ */
 export class Api {
+    // #region Properties
+
     private baseUrl: string;
     private authCookie: string;
     
     public readonly serverDetails: ConnectResponseBag;
 
+    // #endregion
+
+    /**
+     * Creates an instance of {@link Api}.
+     * 
+     * @param hostname The hostname or base URL to use when connecting to the server.
+     * @param authCookie The authorization cookie returned by the login process.
+     * @param connectBag The details about the server.
+     */
     private constructor(hostname: string, authCookie: string, connectBag: ConnectResponseBag) {
         this.authCookie = authCookie;
         this.serverDetails = connectBag;
@@ -92,6 +106,17 @@ export class Api {
         }
     }
 
+    // #region Functions
+
+    /**
+     * Initiates a new connection to the server.
+     * 
+     * @param hostname The hostname or base URL to use when connecting to the server.
+     * @param username The username to authenticate with.
+     * @param password The password to authenticate with.
+     * 
+     * @returns An instance of {@link Api} that can be used to communicate with the server.
+     */
     public static async connect(hostname: string, username: string, password: string): Promise<Api> {
         let baseUrl = hostname.includes("://") ? hostname : `https://${hostname}`;
         const loginUrl = `${baseUrl}/api/Auth/Login`;
@@ -135,6 +160,13 @@ export class Api {
         }
     }
 
+    /**
+     * Executes a SQL query against the Rock database.
+     * 
+     * @param queryText The SQL query text to be executed.
+     * 
+     * @returns The results of the query.
+     */
     public async executeQuery(queryText: string): Promise<ExecuteQueryResult> {
         const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
         const data: ExecuteQueryRequest = {
@@ -155,6 +187,13 @@ export class Api {
         }
     }
 
+    /**
+     * Gets the child nodes of the given parent.
+     * 
+     * @param nodeId The identifier of the parent node whose children are requested.
+     * 
+     * @returns An array of node bags that describe the child nodes.
+     */
     public async getChildNodes(nodeId: string | undefined): Promise<ObjectExplorerNodeBag[]> {
         const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ObjectExplorerNodes`;
         const data: ObjectExplorerNodesRequestBag = {
@@ -174,4 +213,33 @@ export class Api {
             throw getDefaultError(result.data);
         }
     }
+
+    /**
+     * Gets the names of the columns for the table.
+     * 
+     * @param table The name of the table whose column names are requested.
+     * 
+     * @returns An array of column names.
+     */
+    public async getColumnNames(table: string): Promise<string[]> {
+        const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ColumnNames`;
+        const data: GetColumnNamesRequestBag = {
+            tableName: table
+        };
+
+        const result = await axios.post<GetColumnNamesResponseBag>(url, JSON.stringify(data), {
+            headers: {
+                "Cookie": this.authCookie
+            }
+        });
+
+        if (result.status === 200) {
+            return result.data.columns;
+        }
+        else {
+            throw getDefaultError(result.data);
+        }
+    }
+
+    // #endregion
 }
