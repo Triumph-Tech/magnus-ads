@@ -1,6 +1,7 @@
 import * as azdata from 'azdata';
 import { Api } from './api';
-import { ExecuteQueryResult, QueryColumn, QueryMessage } from './types';
+import { ExecuteQueryResult, QueryColumn, QueryColumnType, QueryMessage, QueryResultSet } from './types';
+import { getCellDisplayValue } from './utils';
 
 /**
  * Handles all the processing and logic of executing a query on the Rock server.
@@ -79,6 +80,38 @@ export class QueryRunner {
     }
 
     /**
+     * Gets the number of result sets returned by the query.
+     * 
+     * @returns The number of result sets.
+     */
+    public getResultSetCount(): number {
+        if (!this.result) {
+            throw new Error("Query has not completed.");
+        }
+
+        return this.result.resultSets?.length ?? 0;
+    }
+
+    /**
+     * Gets the raw query result set from the query.
+     * 
+     * @param resultSet The index of the result set to be retrieved.
+     * 
+     * @returns The query result set.
+     */
+    public getQueryResultSet(resultSet: number): QueryResultSet {
+        if (!this.result) {
+            throw new Error("Query has not completed.");
+        }
+
+        if (!this.result.resultSets || resultSet >= this.result.resultSets.length) {
+            throw new Error("Invalid result set specified.");
+        }
+
+        return this.result.resultSets[resultSet];
+    }
+
+    /**
      * Gets the result set summary objects.
      * 
      * @returns The summary objects describing the result sets for the query.
@@ -139,7 +172,7 @@ export class QueryRunner {
             message: "",
             resultSubset: {
                 rowCount: count,
-                rows: resultSet.rows.slice(startRow, startRow + count).map(r => this.getRow(r))
+                rows: resultSet.rows.slice(startRow, startRow + count).map(r => this.getRow(resultSet.columns, r))
             }
         };
     }
@@ -160,11 +193,12 @@ export class QueryRunner {
     /**
      * Gets the row of data that can be passed to ADS.
      * 
+     * @param columns The columns that correspond to the row data.
      * @param row The row to be converted.
      * @returns An array of cells in a format that ADS expects.
      */
-    private getRow(row: unknown[]): azdata.DbCellValue[] {
-        return row.map(c => {
+    private getRow(columns: QueryColumn[], row: unknown[]): azdata.DbCellValue[] {
+        return row.map((c, index) => {
             if (c === null || c === undefined) {
                 return {
                     displayValue: "",
@@ -173,10 +207,12 @@ export class QueryRunner {
                 };
             }
             else {
+                const value = getCellDisplayValue(columns[index].type, c);
+
                 return {
-                    displayValue: String(c),
+                    displayValue: value,
                     isNull: false,
-                    invariantCultureDisplayValue: String(c)
+                    invariantCultureDisplayValue: value
                 };
             }
         });

@@ -1,13 +1,15 @@
 import * as azdata from 'azdata';
 import { promises as fs } from 'fs';
 import { EOL } from 'os';
+import { QueryColumn, QueryResultSet } from '../types';
+import { getCellDisplayValue } from '../utils';
 
 export interface IExportSerializer {
-    open(summary: azdata.ResultSetSummary): Promise<void>;
+    open(resultSet: QueryResultSet): Promise<void>;
 
     close(): Promise<void>;
 
-    writeRow(row: azdata.DbCellValue[]): Promise<void>;
+    writeRow(columns: QueryColumn[], row: unknown[]): Promise<void>;
 }
 
 export class ExportToJson implements IExportSerializer {
@@ -17,14 +19,14 @@ export class ExportToJson implements IExportSerializer {
 
     private columnNames: string[] = [];
 
-    private dataObject: Record<string, string | null>[] = [];
+    private dataObject: Record<string, unknown>[] = [];
 
     constructor(request: azdata.SaveResultsRequestParams) {
         this.filePath = request.filePath;
     }
 
-    async open(summary: azdata.ResultSetSummary): Promise<void> {
-        this.columnNames = summary.columnInfo.map(c => c.columnName);
+    async open(resultSet: QueryResultSet): Promise<void> {
+        this.columnNames = resultSet.columns.map(c => c.name);
         this.stream = await fs.open(this.filePath, "w");
     }
 
@@ -37,15 +39,15 @@ export class ExportToJson implements IExportSerializer {
         }
     }
 
-    writeRow(row: azdata.DbCellValue[]): Promise<void> {
-        const data: Record<string, string | null> = {};
+    writeRow(columns: QueryColumn[], row: unknown[]): Promise<void> {
+        const data: Record<string, unknown> = {};
 
         for (let i = 0; i < row.length && i < this.columnNames.length; i++) {
-            if (row[i].isNull) {
+            if (row[i] === null || row[i] === undefined) {
                 data[this.columnNames[i]] = null;
             }
             else {
-                data[this.columnNames[i]] = row[i].displayValue;
+                data[this.columnNames[i]] = row[i];
             }
         }
         this.dataObject.push(data);
@@ -83,11 +85,11 @@ export class ExportToCsv implements IExportSerializer {
         }
     }
 
-    public async open(summary: azdata.ResultSetSummary): Promise<void> {
+    public async open(resultSet: QueryResultSet): Promise<void> {
         this.stream = await fs.open(this.filePath, "w");
 
         if (this.includeHeaders) {
-            const headers = summary.columnInfo.map(c => this.encodeValue(c.columnName));
+            const headers = resultSet.columns.map(c => this.encodeValue(c.name));
             const line = headers.join(this.delimiter) + this.lineSeperator;
 
             await this.stream.write(Buffer.from(line, this.encoding));
@@ -101,14 +103,21 @@ export class ExportToCsv implements IExportSerializer {
         }
     }
 
-    public async writeRow(row: azdata.DbCellValue[]): Promise<void> {
+    public async writeRow(columns: QueryColumn[], row: unknown[]): Promise<void> {
         if (!this.stream) {
             return;
         }
 
-        const fields = row.map(f => this.encodeValue(f.isNull ? null : f.displayValue));
+        const fields = row.map((f, idx): string => {
+            if (f === null || f === undefined) {
+                return this.encodeValue(null);
+            }
+            else {
+                return this.encodeValue(getCellDisplayValue(columns[idx].type, f));
+            }
+        });
+ 
         const line = fields.join(this.delimiter) + this.lineSeperator;
-
         
         await this.stream.write(Buffer.from(line, this.encoding));
     }

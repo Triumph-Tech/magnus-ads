@@ -198,9 +198,7 @@ export class QueryProvider implements azdata.QueryProvider {
 
     async saveResults(requestParams: azdata.SaveResultsRequestParams): Promise<azdata.SaveResultRequestResult> {
         const query = this.activeQueries[requestParams.ownerUri];
-        const summary = query.getResultSetSummaries()[requestParams.resultSetIndex];
-        const rowCount = summary.rowCount;
-        const rowData = query.getResultSet(requestParams.resultSetIndex, 0, rowCount);
+        const resultSet = query.getQueryResultSet(requestParams.resultSetIndex);
         let serializer: IExportSerializer | undefined;
 
         if (requestParams.resultFormat === "csv") {
@@ -211,10 +209,10 @@ export class QueryProvider implements azdata.QueryProvider {
         }
 
         if (serializer) {
-            await serializer.open(summary);
+            await serializer.open(resultSet);
 
-            for (const row of rowData.resultSubset.rows) {
-                serializer.writeRow(row);
+            for (const row of resultSet.rows) {
+                serializer.writeRow(resultSet.columns, row);
             }
 
             await serializer.close();
