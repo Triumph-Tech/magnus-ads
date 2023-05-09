@@ -3,7 +3,9 @@ import * as vscode from "vscode";
 import { ConnectionProvider } from "./connectionProvider";
 import { QueryRunner } from "./queryRunner";
 import { runClientRequest, toElapsedString } from "./utils";
-import { ExportToCsv, ExportToJson, IExportSerializer } from "./serializers/exportToCsv";
+import { ExportToCsv } from "./serializers/exportToCsv";
+import { IExportSerializer } from "./types";
+import { ExportToJson } from "./serializers/exportToJson";
 
 /**
  * The provider for running queries in Azure Data Studio.

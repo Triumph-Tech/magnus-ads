@@ -100,3 +100,11 @@ export type GetColumnNamesRequestBag = {
 export type GetColumnNamesResponseBag = {
     columns: string[];
 };
+
+export interface IExportSerializer {
+    open(resultSet: QueryResultSet): Promise<void>;
+
+    close(): Promise<void>;
+
+    writeRow(columns: QueryColumn[], row: unknown[]): Promise<void>;
+}
