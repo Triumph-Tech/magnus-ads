@@ -1,5 +1,15 @@
 export enum QueryColumnType {
-    String = 0
+    Unknown = 0,
+
+    String = 1,
+
+    Number = 2,
+
+    Boolean = 3,
+
+    DateTime = 4,
+
+    ByteArray = 5
 }
 
 export type ExecuteQueryRequest = {
