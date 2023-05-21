@@ -1,25 +1,6 @@
-import { Axios} from "axios";
+import fetch from "node-fetch";
 import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag, ConnectResponseBag, GetColumnNamesRequestBag, GetColumnNamesResponseBag } from "./types";
 import { AbortSignal } from "abort-controller";
-
-const axios = new Axios({
-    headers: {
-        "Content-Type": "application/json"
-    },
-    timeout: 1 * 60 * 60 * 1000, // 1 hour
-    transformResponse: (data: unknown): unknown => {
-        if (typeof data === "string" && data !== "") {
-            try {
-                return jsonParse(data);
-            }
-            catch {
-                return data;
-            }
-        }
-
-        return data;
-    }
-});
 
 function getDefaultError(data: unknown): Error {
     if (!data || typeof data !== "object") {
@@ -71,8 +52,14 @@ function toCamelCaseReviver(_key: string, value: unknown): unknown {
  *
  * @returns The object that was parsed.
  */
-function jsonParse<T>(json: string): T {
-    return JSON.parse(json, toCamelCaseReviver) as T;
+function jsonParse<T>(json: string | Buffer): T {
+    if (typeof json === "string") {
+        return JSON.parse(json, toCamelCaseReviver) as T;
+    }
+    else {
+        const raw = json.toString("utf-8");
+        return JSON.parse(raw, toCamelCaseReviver) as T;
+    }
 }
 
 /**
@@ -122,10 +109,17 @@ export class Api {
         let baseUrl = hostname.includes("://") ? hostname : `https://${hostname}`;
         const loginUrl = `${baseUrl}/api/Auth/Login`;
 
-        const response = await axios.post(loginUrl, JSON.stringify({
-            username,
-            password
-        }));
+        const response = await fetch(loginUrl, {
+            method: "post",
+            timeout: 30000,
+            body: JSON.stringify({
+                username,
+                password
+            }),
+            headers: {
+                "Content-Type": "application/json"
+            }
+        });
 
         if (response.status === 401) {
             throw new Error("Invalid username or password.");
@@ -134,11 +128,14 @@ export class Api {
             throw new Error("Unable to login, unknown error occurred.");
         }
 
-        if (!response.headers["set-cookie"]) {
+        if (!response.headers.has("set-cookie")) {
             throw new Error("Invalid response received from the server.");
         }
 
-        const cookie = response.headers["set-cookie"].find(c => c.startsWith(".ROCK="));
+        const setCookieKey = Object.keys(response.headers.raw()).find(k => k.toLowerCase() === "set-cookie");
+        const cookie = setCookieKey
+            ? response.headers.raw()[setCookieKey].find(c => c.startsWith(".ROCK="))
+            : undefined;
 
         if (!cookie) {
             throw new Error("Invalid response received from the server.");
@@ -147,14 +144,19 @@ export class Api {
         const authCookie = cookie.split(";")[0];
 
         const connectUrl = `${baseUrl}/api/TriumphTech/Magnus/Sql/Connect`;
-        const connectResponse = await axios.post<ConnectResponseBag>(connectUrl, JSON.stringify({}), {
+        const connectResponse = await fetch(connectUrl, {
+            method: "post",
+            body: JSON.stringify({}),
+            timeout: 30000,
             headers: {
+                "Content-Type": "application/json",
                 "Cookie": authCookie
             }
         });
 
         if (connectResponse.status === 200) {
-            return new Api(hostname, authCookie, connectResponse.data);
+            const data = jsonParse<ConnectResponseBag>(await connectResponse.buffer());
+            return new Api(hostname, authCookie, data);
         }
         else {
             throw new Error("Unable to negotiate connection with the server.");
@@ -174,18 +176,22 @@ export class Api {
             query: queryText
         };
 
-        const result = await axios.post<ExecuteQueryResult>(url, JSON.stringify(data), {
-            signal: abort,
+        const result = await fetch(url, {
+            method: "post",
+            body: JSON.stringify(data),
+            timeout: 1 * 60 * 60 * 1000, // 1 hour
+            signal: abort as any,
             headers: {
+                "Content-Type": "application/json",
                 "Cookie": this.authCookie
             }
         });
 
         if (result.status === 200) {
-            return result.data;
+            return jsonParse<ExecuteQueryResult>(await result.buffer());
         }
         else {
-            throw getDefaultError(result.data);
+            throw getDefaultError(await jsonParse(await result.buffer()));
         }
     }
 
@@ -202,17 +208,22 @@ export class Api {
             nodeId
         };
 
-        const result = await axios.post<ObjectExplorerNodesResponseBag>(url, JSON.stringify(data), {
+        const result = await fetch(url, {
+            method: "post",
+            body: JSON.stringify(data),
+            timeout: 30000,
             headers: {
+                "Content-Type": "application/json",
                 "Cookie": this.authCookie
             }
         });
 
         if (result.status === 200) {
-            return result.data.nodes;
+            const data = jsonParse<ObjectExplorerNodesResponseBag>(await result.buffer());
+            return data.nodes;
         }
         else {
-            throw getDefaultError(result.data);
+            throw getDefaultError(jsonParse(await result.buffer()));
         }
     }
 
@@ -229,17 +240,22 @@ export class Api {
             tableName: table
         };
 
-        const result = await axios.post<GetColumnNamesResponseBag>(url, JSON.stringify(data), {
+        const result = await fetch(url, {
+            method: "post",
+            body: JSON.stringify(data),
+            timeout: 30000,
             headers: {
+                "Content-Type": "application/json",
                 "Cookie": this.authCookie
             }
         });
 
         if (result.status === 200) {
-            return result.data.columns;
+            const data = jsonParse<GetColumnNamesResponseBag>(await result.buffer());
+            return data.columns;
         }
         else {
-            throw getDefaultError(result.data);
+            throw getDefaultError(jsonParse(await result.buffer()));
         }
     }
 

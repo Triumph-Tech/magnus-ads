@@ -139,6 +139,7 @@
 		"@types/glob": "^7.1.4",
 		"@types/mocha": "^9.0.0",
 		"@types/node": "^13.11.0",
+		"@types/node-fetch": "^2.6.4",
 		"@types/uuid": "^9.0.1",
 		"@types/vscode": "^1.39.0",
 		"@typescript-eslint/eslint-plugin": "^2.30.0",
@@ -156,7 +157,7 @@
 	},
 	"dependencies": {
 		"abort-controller": "^3.0.0",
-		"axios": "^1.4.0",
+		"node-fetch": "^2.6.11",
 		"uuid": "^9.0.0"
 	}
 }
