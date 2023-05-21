@@ -1,5 +1,6 @@
 import { Axios} from "axios";
 import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag, ConnectResponseBag, GetColumnNamesRequestBag, GetColumnNamesResponseBag } from "./types";
+import { AbortSignal } from "abort-controller";
 
 const axios = new Axios({
     headers: {
@@ -167,13 +168,14 @@ export class Api {
      * 
      * @returns The results of the query.
      */
-    public async executeQuery(queryText: string): Promise<ExecuteQueryResult> {
+    public async executeQuery(queryText: string, abort?: AbortSignal): Promise<ExecuteQueryResult> {
         const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
         const data: ExecuteQueryRequest = {
             query: queryText
         };
 
         const result = await axios.post<ExecuteQueryResult>(url, JSON.stringify(data), {
+            signal: abort,
             headers: {
                 "Cookie": this.authCookie
             }

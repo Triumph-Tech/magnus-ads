@@ -155,6 +155,7 @@
 		"webpack-cli": "^5.1.1"
 	},
 	"dependencies": {
+		"abort-controller": "^3.0.0",
 		"axios": "^1.4.0",
 		"uuid": "^9.0.0"
 	}

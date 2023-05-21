@@ -1,4 +1,5 @@
 import * as azdata from 'azdata';
+import { AbortController } from "abort-controller";
 import { Api } from './api';
 import { ExecuteQueryResult, QueryColumn, QueryColumnType, QueryMessage, QueryResultSet } from './types';
 import { getCellDisplayValue } from './utils';
@@ -13,6 +14,7 @@ export class QueryRunner {
     private query: string;
     private cancelled: boolean = false;
     private result?: ExecuteQueryResult;
+    private abortController: AbortController;
 
     // #endregion
 
@@ -25,6 +27,7 @@ export class QueryRunner {
     constructor(api: Api, query: string) {
         this.api = api;
         this.query = query;
+        this.abortController = new AbortController();
     }
 
     // #region Property Accessors
@@ -47,7 +50,7 @@ export class QueryRunner {
      * @returns A promise that will be resolved when the query has completed.
      */
     public async execute(): Promise<void> {
-        this.result = await this.api.executeQuery(this.query);
+        this.result = await this.api.executeQuery(this.query, this.abortController.signal);
     }
 
     /**
@@ -55,6 +58,7 @@ export class QueryRunner {
      */
     public cancel(): void {
         this.cancelled = true;
+        this.abortController.abort();
     }
 
     /**
