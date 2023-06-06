@@ -68,11 +68,12 @@ export class QueryProvider implements azdata.QueryProvider {
             throw new Error("Not connected to server.");
         }
 
-        var doc = vscode.workspace.textDocuments.find(td => td.uri.toString() === ownerUri);
+        const ownerUriString = vscode.Uri.parse(ownerUri).toString();
+        const doc = vscode.workspace.textDocuments.find(td => td.uri.toString() === ownerUriString);
 
         runClientRequest(async () => {
             if (!doc) {
-                // TODO Report error.
+                console.error("Unable to locate document for query.");
                 return;
             }
 
