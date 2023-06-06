@@ -3,7 +3,7 @@
 	"displayName": "Magnus",
 	"description": "Triumph Tech’s Magnus for ADS allows remote SQL database access for Rock RMS.",
 	"publisher": "TriumphTech",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"engines": {
 		"vscode": "^1.41.0",
 		"azdata": "*"
