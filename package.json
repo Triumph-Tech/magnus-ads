@@ -157,6 +157,7 @@
 	},
 	"dependencies": {
 		"abort-controller": "^3.0.0",
+		"exceljs": "^4.3.0",
 		"node-fetch": "^2.6.11",
 		"uuid": "^9.0.0"
 	}

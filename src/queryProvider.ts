@@ -6,6 +6,7 @@ import { runClientRequest, toElapsedString } from "./utils";
 import { ExportToCsv } from "./serializers/exportToCsv";
 import { IExportSerializer } from "./types";
 import { ExportToJson } from "./serializers/exportToJson";
+import { ExporttoExcel } from "./serializers/exportToExcel";
 
 /**
  * The provider for running queries in Azure Data Studio.
@@ -209,6 +210,9 @@ export class QueryProvider implements azdata.QueryProvider {
         }
         else if (requestParams.resultFormat === "json") {
             serializer = new ExportToJson(requestParams);
+        }
+        else if (requestParams.resultFormat === "excel") {
+            serializer = new ExporttoExcel(requestParams);
         }
 
         if (serializer) {
