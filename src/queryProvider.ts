@@ -118,7 +118,7 @@ export class QueryProvider implements azdata.QueryProvider {
                         ownerUri,
                         message: {
                             batchId: batch.id,
-                            isError: !!m.code,
+                            isError: (m.level ?? 0) > 10,
                             message: m.message
                         }
                     });
@@ -135,7 +135,7 @@ export class QueryProvider implements azdata.QueryProvider {
                         ownerUri,
                         message: {
                             batchId: batch.id,
-                            isError: !!queryMessages[msgIndex].code,
+                            isError: (queryMessages[msgIndex].level ?? 0) > 10,
                             message: queryMessages[msgIndex].message
                         }
                     });
