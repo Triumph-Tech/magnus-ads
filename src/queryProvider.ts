@@ -97,6 +97,7 @@ export class QueryProvider implements azdata.QueryProvider {
             this.activeQueries[ownerUri] = query;
 
             const start = new Date();
+            let seenMessageCount = 0;
 
             const batch: azdata.BatchSummary = <azdata.BatchSummary>{
                 id: 0,
@@ -110,19 +111,32 @@ export class QueryProvider implements azdata.QueryProvider {
             });
 
             try {
-                await query.execute();
+                await query.execute(m => {
+                    seenMessageCount++;
+
+                    this.onMessage.fire({
+                        ownerUri,
+                        message: {
+                            batchId: batch.id,
+                            isError: !!m.code,
+                            message: m.message
+                        }
+                    });
+                });
 
                 if (query.isCancelled()) {
                     return;
                 }
 
-                for (const message of query.getMessages()) {
+                // Display only new messages we haven't already seen.
+                const queryMessages = query.getMessages();
+                for (let msgIndex = seenMessageCount; msgIndex < queryMessages.length; msgIndex++) {
                     this.onMessage.fire({
                         ownerUri,
                         message: {
                             batchId: batch.id,
-                            isError: !!message.code,
-                            message: message.message
+                            isError: !!queryMessages[msgIndex].code,
+                            message: queryMessages[msgIndex].message
                         }
                     });
                 }

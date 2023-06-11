@@ -1,7 +1,7 @@
 import * as azdata from 'azdata';
 import { AbortController } from "abort-controller";
 import { Api } from './api';
-import { ExecuteQueryResult, QueryColumn, QueryColumnType, QueryMessage, QueryResultSet } from './types';
+import { ExecuteQueryProgress, QueryColumn, QueryMessage, QueryResultSet } from './types';
 import { getCellDisplayValue } from './utils';
 
 /**
@@ -13,7 +13,7 @@ export class QueryRunner {
     private api: Api;
     private query: string;
     private cancelled: boolean = false;
-    private result?: ExecuteQueryResult;
+    private result?: ExecuteQueryProgress;
     private abortController: AbortController;
 
     // #endregion
@@ -47,10 +47,12 @@ export class QueryRunner {
     /**
      * Executes the query asynchronously.
      * 
+     * @param messageCallback A function to be called when messages are recieved while the query is running.
+     * 
      * @returns A promise that will be resolved when the query has completed.
      */
-    public async execute(): Promise<void> {
-        this.result = await this.api.executeQuery(this.query, this.abortController.signal);
+    public async execute(messageCallback: (message: QueryMessage) => void): Promise<void> {
+        this.result = await this.api.executeQuery(this.query, messageCallback, this.abortController.signal);
     }
 
     /**

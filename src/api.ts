@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ExecuteQueryResult, ObjectExplorerNodeBag, ConnectResponseBag, GetColumnNamesRequestBag, GetColumnNamesResponseBag } from "./types";
+import { ObjectExplorerNodesRequestBag, ObjectExplorerNodesResponseBag, ExecuteQueryRequest, ObjectExplorerNodeBag, ConnectResponseBag, GetColumnNamesRequestBag, GetColumnNamesResponseBag, ExecuteQueryProgress, QueryMessage } from "./types";
 import { AbortSignal } from "abort-controller";
 
 function getDefaultError(data: unknown): Error {
@@ -170,7 +170,7 @@ export class Api {
      * 
      * @returns The results of the query.
      */
-    public async executeQuery(queryText: string, abort?: AbortSignal): Promise<ExecuteQueryResult> {
+    public async executeQuery(queryText: string, messageCallback: (data: QueryMessage) => void, abort?: AbortSignal): Promise<ExecuteQueryProgress> {
         const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
         const data: ExecuteQueryRequest = {
             query: queryText
@@ -179,19 +179,45 @@ export class Api {
         const result = await fetch(url, {
             method: "post",
             body: JSON.stringify(data),
-            timeout: 1 * 60 * 60 * 1000, // 1 hour
+            timeout: 1 * 61 * 60 * 1000, // 1 hour and 1 minute - buffer for the server.
             signal: abort as any,
             headers: {
+                // Disable gzip/deflate encoding as that messes up reading
+                // of the chunks.
+                "Accept-Encoding": "identity",
                 "Content-Type": "application/json",
                 "Cookie": this.authCookie
             }
         });
 
         if (result.status === 200) {
-            return jsonParse<ExecuteQueryResult>(await result.buffer());
+            for await (const chunk of result.body) {
+                try {
+                    const chunkData = jsonParse<ExecuteQueryProgress>(chunk);
+
+                    // Check if this is an error message.
+                    if (typeof chunkData.isComplete !== "boolean") {
+                        throw getDefaultError(chunkData);
+                    }
+
+                    if (chunkData.isComplete) {
+                        return chunkData;
+                    }
+
+                    for (const msg of chunkData.messages) {
+                        messageCallback(msg);
+                    }
+                }
+                catch (error) {
+                    console.error(error);
+                    // Log the error, but don't abort.
+                }
+            }
+
+            throw new Error("Request completed without a valid response.");
         }
         else {
-            throw getDefaultError(await jsonParse(await result.buffer()));
+            throw getDefaultError(jsonParse(await result.buffer()));
         }
     }
 
