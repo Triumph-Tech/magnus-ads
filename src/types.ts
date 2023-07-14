@@ -17,6 +17,8 @@ export type ExecuteQueryRequest = {
 };
 
 export type ExecuteQueryProgress = {
+    identifier: string;
+    
     isComplete: boolean;
 
     duration: number;

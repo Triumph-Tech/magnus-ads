@@ -171,54 +171,65 @@ export class Api {
      * @returns The results of the query.
      */
     public async executeQuery(queryText: string, messageCallback: (data: QueryMessage) => void, abort?: AbortSignal): Promise<ExecuteQueryProgress> {
-        const url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
+        let url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/ExecuteQuery`;
+        let identifier: string;
+        let aborted = false;
         const data: ExecuteQueryRequest = {
             query: queryText
         };
 
-        const result = await fetch(url, {
+        abort?.addEventListener("abort", () => {
+            aborted = true;
+
+            if (identifier) {
+                fetch(`${this.baseUrl}/api/TriumphTech/Magnus/Sql/Cancel/${identifier}`, {
+                    method: "delete",
+                    headers: {
+                        "Cookie": this.authCookie
+                    }
+                });
+            }
+        });
+
+        let result = await fetch(url, {
             method: "post",
             body: JSON.stringify(data),
-            timeout: 1 * 61 * 60 * 1000, // 1 hour and 1 minute - buffer for the server.
-            signal: abort as any,
             headers: {
-                // Disable gzip/deflate encoding as that messes up reading
-                // of the chunks.
-                "Accept-Encoding": "identity",
                 "Content-Type": "application/json",
                 "Cookie": this.authCookie
             }
         });
 
-        if (result.status === 200) {
-            for await (const chunk of result.body) {
-                try {
-                    const chunkData = jsonParse<ExecuteQueryProgress>(chunk);
-
-                    // Check if this is an error message.
-                    if (typeof chunkData.isComplete !== "boolean") {
-                        throw getDefaultError(chunkData);
-                    }
-
-                    if (chunkData.isComplete) {
-                        return chunkData;
-                    }
-
-                    for (const msg of chunkData.messages) {
-                        messageCallback(msg);
-                    }
-                }
-                catch (error) {
-                    console.error(error);
-                    // Log the error, but don't abort.
-                }
-            }
-
-            throw new Error("Request completed without a valid response.");
-        }
-        else {
+        if (result.status !== 200) {
             throw getDefaultError(jsonParse(await result.buffer()));
         }
+
+        let progress = jsonParse<ExecuteQueryProgress>(await result.buffer());
+
+        identifier = progress.identifier;
+        url = `${this.baseUrl}/api/TriumphTech/Magnus/Sql/Status/${identifier}`;
+
+        // Check for completed.
+        while (!progress.isComplete) {
+            for (const msg of progress.messages) {
+                messageCallback(msg);
+            }
+
+            result = await fetch(url, {
+                method: "get",
+                headers: {
+                    "Cookie": this.authCookie
+                }
+            });
+
+            if (result.status !== 200) {
+                throw getDefaultError(jsonParse(await result.buffer()));
+            }
+    
+            progress = jsonParse<ExecuteQueryProgress>(await result.buffer());
+        }
+
+        return progress;
     }
 
     /**
