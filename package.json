@@ -1,9 +1,22 @@
 {
-	"name": "magnus",
+	"name": "magnus-ads",
 	"displayName": "Magnus",
 	"description": "Triumph Tech’s Magnus for ADS allows remote SQL database access for Rock RMS.",
 	"publisher": "TriumphTech",
-	"version": "0.0.3",
+	"version": "0.9.0",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/triumph-tech/magnus-ads.git"
+	},
+	"icon": "resources/marketplace-icon.png",
+	"galleryBanner": {
+		"color": "#0A2540",
+		"theme": "dark"
+	},
+	"bugs": {
+		"url": "https://github.com/triumph-tech/magnus-ads/issues"
+	},
 	"engines": {
 		"vscode": "^1.41.0",
 		"azdata": "*"
@@ -14,7 +27,7 @@
 	"activationEvents": [
 		"onConnect:magnus"
 	],
-	"main": "./out/extension.js",
+	"main": "./dist/extension.js",
 	"contributes": {
 		"commands": [
 			{
@@ -125,12 +138,12 @@
 		}
 	},
 	"scripts": {
-		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -p ./",
-		"lint": "eslint src --ext ts",
+		"vscode:prepublish": "webpack --mode production",
+		"build": "webpack --mode development",
 		"watch": "tsc -watch -p ./",
 		"package": "vsce package",
 		"pretest": "npm run compile && npm run lint",
+		"lint": "eslint src --ext ts",
 		"test": "node ./out/test/runTest.js",
 		"proposedapi": "node installTypings.js"
 	},
