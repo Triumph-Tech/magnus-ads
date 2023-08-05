@@ -28,3 +28,9 @@ Once these two steps are complete you’ll then head over to the plugin settings
 # Additional Details
 
 For more details and documentation on this plugin please see our [Triumph Tech Magnus page](https://www.triumph.tech/magnus).
+
+# License
+
+Copyright (c) Triumph Tech. All rights reserved.
+
+Licensed under the [MIT](https://raw.githubusercontent.com/triumph-tech/magnus-ads/main/LICENSE.txt) license.
