@@ -2,7 +2,7 @@
   <img width="400" src="docs/magnus-vscode.png">
 </p>
 
-# Magnus Visual Studio Code Editor for Rock RMS 
+# Magnus Azure Data Studio for Rock RMS 
 
 Triumph Tech’s Magnus for Azure Data Studio is a remote database connection for Rock RMS. [Rock RMS](https://www.rockrms.com) is an open source Relationship Management System (RMS) and Application Framework for 501c3 organizations.
 
